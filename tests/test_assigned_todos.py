@@ -398,5 +398,183 @@ class Note(unittest.TestCase):
         self.assertIn("the request is closed", body)
 
 
+WEEKLY = {"frequency": "every_week", "days": [0], "hour": 0, "minute": 0, "week_instance": None, "week_interval": None,
+          "month_interval": None, "start_date": "2026-10-18", "duration": None, "end_date": None}
+RULE = {"frequency": "every_week", "days": [0], "hour": 0, "minute": 0, "start_date": "2026-10-18"}
+
+
+def scheduled(id, due="2026-10-18", rule=WEEKLY, by=CAPTAIN, title="Update firstmate", parent=9, **kw):
+    """A to-do due on `due` that repeats by `rule` (None: does not repeat), in to-do list or set `parent`."""
+    t = todo(id, by=by, title=title, description="<p>Run it on the due date and not before.</p>", **kw)
+    t.update(due_on=due, parent={"id": parent, "title": "Maintenance", "type": "Todoset"})
+    if rule is not None:
+        t["repetition_schedule"] = dict(rule)
+    return t
+
+
+class Scheduled(AssignBase):
+    """Scheduled to-dos: a due date on any request, and Basecamp's repeating to-dos, whose next occurrence Basecamp makes."""
+
+    def next_occurrence(self, id, due="2026-10-25", by=ACTING, **kw):
+        """What Basecamp does on completing a repeating to-do: a new to-do with the next due date. Its creator is not
+        the person who asked (here the agent that completed it), so only the series makes it a request."""
+        return self.add(scheduled(id, due=due, by=by, **kw))
+
+    def test_a_request_carries_its_due_date_and_repetition_rule(self):
+        self.add(scheduled(42))
+        self.add(scheduled(43, rule=None, title="Renew the domain", parent=8))
+        self.add(todo(44, title="Undated"))
+        self.poll()
+        got = {r["todo"]: (r["due_on"], r["repeats"], r["follows"]) for r in self.pending()}
+        self.assertEqual(got, {42: ("2026-10-18", RULE, None), 43: ("2026-10-18", None, None), 44: (None, None, None)})
+        self.assertEqual((self.request(42)["due_on"], self.request(42)["repeats"]), ("2026-10-18", RULE))
+
+    def test_the_next_occurrence_after_the_agent_completes_one_is_a_new_request_once(self):
+        self.add(scheduled(42))
+        self.poll()
+        self.assertTrue(self.sync().todo_complete("request-42"))
+        self.next_occurrence(43)
+        self.poll()
+        self.poll()
+        first, nxt = self.pending()
+        self.assertEqual(len(self.pending()), 2)
+        self.assertEqual({k: nxt[k] for k in ("kind", "key", "todo", "n", "reopened", "follows", "due_on", "repeats")},
+                         {"kind": "todo-request", "key": "request-43", "todo": 43, "n": 1, "reopened": False,
+                          "follows": 42, "due_on": "2026-10-25", "repeats": RULE})
+        # Asked for by whoever asked for the series, not the to-do's creator (Basecamp's machinery, or the agent).
+        self.assertEqual((nxt["author"]["id"], nxt["captain"]), (CAPTAIN, True))
+        self.assertEqual((self.request(42)["next"], self.request(43).get("completed")), (43, None))
+        self.assertEqual(self.stub.made("todos create"), [])  # the agent never makes the next one
+
+    def test_the_next_occurrence_after_the_owner_completes_one_follows_the_closed_request(self):
+        self.add(scheduled(42))
+        self.poll()
+        self.edit(42, completed=True, completion={"creator": {"id": CAPTAIN, "name": "Cap"}, "created_at": "tc"})
+        self.next_occurrence(43, by=CAPTAIN)
+        self.poll()
+        self.poll()
+        self.assertEqual([(r["kind"], r["todo"], r.get("reason"), r.get("follows")) for r in self.pending()],
+                         [("todo-request", 42, None, None), ("todo-request-closed", 42, "completed", None),
+                          ("todo-request", 43, None, 42)])
+        self.assertEqual(self.pending()[1]["repeats"], RULE)
+
+    def test_a_series_request_completed_since_the_last_sweep_closes_first_with_its_last_comments(self):
+        self.add(scheduled(42))
+        self.poll()
+        self.stub.comments["42"] = [comment(5, content="<p>Thanks!</p>")]
+        self.edit(42, completed=True, completion={"creator": {"id": CAPTAIN, "name": "Cap"}, "created_at": "tc"})
+        self.next_occurrence(43)  # made by Basecamp, its creator not listened to
+        self.poll()
+        self.assertEqual([(r["kind"], r["todo"], r.get("follows")) for r in self.pending()],
+                         [("todo-request", 42, None), ("todo-comment", 42, None), ("todo-request-closed", 42, None),
+                          ("todo-request", 43, 42)])
+        self.assertEqual(self.pending()[-1]["author"]["id"], CAPTAIN)
+
+    def test_a_reused_todo_open_again_with_a_new_due_date_is_the_next_occurrence(self):
+        self.add(scheduled(42))
+        self.poll()
+        self.assertTrue(self.sync().todo_complete("request-42"))
+        self.poll()
+        self.edit(42, completed=False, due_on="2026-10-25")
+        self.poll()
+        self.poll()
+        nxt = self.pending()[-1]
+        self.assertEqual(len(self.pending()), 2)
+        self.assertEqual((nxt["kind"], nxt["n"], nxt["reopened"], nxt["follows"], nxt["due_on"]),
+                         ("todo-request", 2, False, 42, "2026-10-25"))
+        self.assertFalse(self.request(42).get("completed"))
+
+    def test_only_one_to_do_follows_a_completed_occurrence(self):
+        self.add(scheduled(42))
+        self.poll()
+        self.assertTrue(self.sync().todo_complete("request-42"))
+        self.next_occurrence(43)
+        self.poll()
+        self.next_occurrence(44, by=STRANGER)  # a copy someone else made is not the series
+        self.poll()
+        self.assertEqual([r["todo"] for r in self.pending()], [42, 43])
+
+    def test_a_like_named_todo_does_not_follow_a_request_that_did_not_repeat_or_was_not_completed(self):
+        self.add(scheduled(42, rule=None))
+        self.add(scheduled(50, title="Rotate", parent=7))
+        self.poll()
+        self.assertTrue(self.sync().todo_complete("request-42"))
+        self.edit(50, assignees=[{"id": CAPTAIN}])  # unassigned: closed, but not completed
+        self.next_occurrence(43)
+        self.next_occurrence(51, title="Rotate", parent=7)
+        self.poll()
+        self.assertEqual([(r["kind"], r["todo"]) for r in self.pending()],
+                         [("todo-request", 42), ("todo-request", 50), ("todo-request-closed", 50)])
+
+    def test_a_moved_due_date_or_changed_rule_is_an_update_carrying_the_schedule(self):
+        self.add(scheduled(42))
+        self.poll()
+        self.edit(42, due_on="2026-10-19")
+        self.poll()
+        self.poll()
+        rule = dict(WEEKLY, days=[1])
+        self.edit(42, repetition_schedule=rule)
+        self.poll()
+        self.edit(42, repetition_schedule=None, due_on=None)
+        self.poll()
+        self.assertEqual([(r["kind"], r["due_on"], (r["repeats"] or {}).get("days")) for r in self.pending()],
+                         [("todo-request", "2026-10-18", [0]), ("todo-request-update", "2026-10-19", [0]),
+                          ("todo-request-update", "2026-10-19", [1]), ("todo-request-update", None, None)])
+        ids = [behaviors.inbox_note(r, "1", "2")[0] for r in self.pending()[1:]]
+        self.assertEqual(len(set(ids)), 3)  # each move is its own note, though the text did not change
+
+    def test_a_request_tracked_before_schedules_were_kept_picks_its_schedule_up_quietly(self):
+        self.add(scheduled(42))
+        self.poll()
+        state = self.todos()
+        for k in ("due_on", "repeats", "parent"):
+            del state["request-42"][k]
+        self.sync().save_json("todos.json", state)
+        self.poll()
+        self.assertEqual(len(self.pending()), 1)
+        self.assertEqual((self.request(42)["due_on"], self.request(42)["parent"]), ("2026-10-18", 9))
+        self.edit(42, due_on="2026-10-20")
+        self.poll()
+        self.assertEqual((self.pending()[-1]["kind"], self.pending()[-1]["due_on"]), ("todo-request-update", "2026-10-20"))
+        self.assertTrue(self.sync().todo_complete("request-42"))
+        self.next_occurrence(43)
+        self.poll()
+        self.assertEqual((self.pending()[-1]["todo"], self.pending()[-1]["follows"]), (43, 42))
+
+    def test_todo_show_reads_the_schedule_from_basecamp_now(self):
+        self.add(scheduled(42))
+        self.poll()
+        self.edit(42, due_on="2026-10-21")
+        out = []
+        self.assertTrue(self.sync().todo_show("request-42", out=out.append))
+        shown = json.loads(out[0])
+        self.assertEqual({k: shown[k] for k in ("key", "todo", "open", "assigned_to_you", "due_on", "repeats")},
+                         {"key": "request-42", "todo": 42, "open": True, "assigned_to_you": True, "due_on": "2026-10-21",
+                          "repeats": RULE})
+        self.assertEqual(self.pending()[-1]["kind"], "todo-request")  # a read records nothing
+
+    def test_scheduled_and_repeating_notes(self):
+        rec = {"kind": "todo-request", "key": "request-43", "todo": 43, "n": 1, "title": "Update firstmate",
+               "captain": True, "due_on": "2026-10-25", "repeats": RULE, "follows": 42}
+        _, body = behaviors.inbox_note(rec, "1", "2")
+        self.assertIn("next occurrence of a repeating to-do, asked for by the captain", body)
+        self.assertIn(", due 2026-10-25, repeating every week on Sunday:", body)
+        self.assertIn("re-read it with sync.py todo show --todo request-43", body)
+        self.assertIn("not before when its description says so", body)
+        self.assertIn("never create it yourself", body)
+        _, body = behaviors.inbox_note(dict(rec, repeats=None, follows=None), "1", "2")
+        self.assertIn("assigned to you by the captain", body)
+        self.assertNotIn("repeat", body)
+        _, body = behaviors.inbox_note({"kind": "todo-request", "key": "request-42", "todo": 42, "captain": True,
+                                        "due_on": None, "repeats": None}, "1", "2")
+        self.assertNotIn("scheduled", body)
+        _, body = behaviors.inbox_note({"kind": "todo-request-closed", "key": "request-42", "todo": 42, "reason": "completed",
+                                        "author": {"id": CAPTAIN}, "captain": True, "repeats": RULE}, "1", "2")
+        self.assertIn("Basecamp makes the next occurrence", body)
+        _, body = behaviors.inbox_note({"kind": "todo-request-update", "key": "request-42", "todo": 42, "text": "x",
+                                        "author": None, "due_on": None, "repeats": None}, "1", "2")
+        self.assertIn("edited, now undated; it now reads", body)
+
+
 if __name__ == "__main__":
     unittest.main()

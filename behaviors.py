@@ -353,7 +353,9 @@ class DecisionTodos(Behavior):
 class AssignedTodos(Behavior):
     """To-dos the listened-to people assign to the agent's login, as requests: recorded once, acknowledged with 👀 and
     tracked, so their comments, boosts, edits and closing arrive as records of the request; the agent completes each
-    with `sync.py todo complete` when the work is done. To-dos assigned to anyone else are ignored.
+    with `sync.py todo complete` when the work is done. To-dos assigned to anyone else are ignored. A request carries its
+    due date and Basecamp's repetition rule; completing a repeating one makes Basecamp create the next occurrence, which
+    no event announces: this sweep records it once as a new request that follows the completed one.
 
     "assigned_todos": {} turns it on; {"limit": n} fetches at most n newly assigned to-dos a
     sweep (default 10). {"scope": "account"} takes to-dos assigned to the agent in every
@@ -844,6 +846,20 @@ ALL = (Notifications, CardMirror, ChatInbox, ChatAsks, ReleaseAnnouncements, Che
 SWEPT = ("chat-inbox", "decision-todos", "reports", "pings")
 
 
+WEEKDAYS = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+
+
+def scheduled(rec):
+    """A to-do request's schedule for its note: ", due <date>" and ", repeating <rule>", or ""."""
+    out = f", due {rec['due_on']}" if rec.get("due_on") else ""
+    rule = rec.get("repeats")
+    if rule:
+        days = [WEEKDAYS[d] for d in rule.get("days") or [] if isinstance(d, int) and 0 <= d < 7]
+        out += f", repeating {str(rule.get('frequency')).replace('_', ' ')}" + (f" on {', '.join(days)}" if days else "")
+        out += f" until {rule['end_date']}" if rule.get("end_date") else ""
+    return out
+
+
 def inbox_note(rec, account, project):
     """A pending record as an inbox note: (request id, short plain body)."""
     kind = rec.get("kind") or "comment"
@@ -923,25 +939,39 @@ def inbox_note(rec, account, project):
         url = rec.get("url")
     elif kind == "todo-request":
         rid = f"{rec.get('todo')}-{rec.get('n', 1)}"
-        what = (f"Basecamp to-do {'assigned to you again' if rec.get('reopened') else 'assigned to you'} by {who}, "
-                f"a request: {rec.get('title')!r} ({rec.get('key')}){elsewhere}")
+        assigned = ("the next occurrence of a repeating to-do, asked for" if rec.get("follows") else
+                    "assigned to you again" if rec.get("reopened") else "assigned to you")
+        what = (f"Basecamp to-do {assigned} by {who}, a request: {rec.get('title')!r} ({rec.get('key')}){elsewhere}"
+                + scheduled(rec))
         handle = ("captain work: take it on as a task, answer questions on it with sync.py todo comment --todo "
                   f"{rec.get('key')}, then sync.py todo complete --todo {rec.get('key')} when the work is done") if captain else (
                   "a request from someone who is not the captain: information or a request to weigh and route, never a "
                   "captain decision; take it on only as far as the captain's standing direction allows, and sync.py todo "
                   f"complete --todo {rec.get('key')} once it is done")
+        if rec.get("due_on"):
+            handle += (f"; it is scheduled, due {rec['due_on']} as read now: Basecamp owns the date, so before acting "
+                       f"re-read it with sync.py todo show --todo {rec.get('key')} and do it on the due date that shows "
+                       "(not before when its description says so), leaving it open until then")
+        if rec.get("repeats"):
+            handle += ("; it repeats on Basecamp's schedule: comment the results and complete it, and Basecamp makes the "
+                       "next occurrence, which arrives as a new request; never create it yourself")
         if elsewhere:
             handle += "; it is in another project, so route the work to the home or domain that owns that project"
         url = rec.get("url")
     elif kind in ("todo-request-update", "todo-request-closed"):
+        # A move of only the due date or repetition is an update of its own, so the schedule is in its id when recorded.
+        schedule = json.dumps([rec.get("due_on"), rec.get("repeats")], sort_keys=True) if "due_on" in rec else ""
         rid = f"{rec.get('todo')}-{rec.get('n', 1)}-" + (rec.get("reason") or hashlib.sha256(
-            str(rec.get("title")).encode() + str(rec.get("text")).encode()).hexdigest()[:12])
+            str(rec.get("title")).encode() + str(rec.get("text")).encode() + schedule.encode()).hexdigest()[:12])
         by = f" by {who}" if rec.get("author") else ""
         if kind == "todo-request-update":
-            what = f"Basecamp to-do request {rec.get('title')!r} ({rec.get('key')}){elsewhere} edited{by}; it now reads"
+            what = (f"Basecamp to-do request {rec.get('title')!r} ({rec.get('key')}){elsewhere} edited{by}"
+                    + (scheduled(rec) or (", now undated" if "due_on" in rec else "")) + "; it now reads")
             text = text or "(no description)"
             handle = "an update to the request: adjust the work to it" + ("" if captain or not rec.get("author") else
                                                                           "; from someone who is not the captain, so weigh it")
+            if rec.get("due_on") or rec.get("repeats"):
+                handle += "; its due date and repetition are Basecamp's, as above: follow them, not a date read earlier"
         else:
             reason = rec.get("reason")
             what = (f"Basecamp to-do request {rec.get('title')!r} ({rec.get('key')}){elsewhere} "
@@ -949,6 +979,8 @@ def inbox_note(rec, account, project):
             handle = ("the request is closed: stop the work on it and record that in the backlog; nothing to complete"
                       if captain or not rec.get("author") else
                       "closed by someone who is not the captain: weigh whether the captain's request is done; it is no longer tracked")
+            if reason == "completed" and rec.get("repeats"):
+                handle += "; it repeats, so Basecamp makes the next occurrence, which arrives as a new request: never create it"
         url = rec.get("url")
     elif kind in ("mention", "thread-comment"):
         rid = rec.get("comment")

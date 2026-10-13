@@ -955,7 +955,7 @@ class Tools:
 
     def todo(self, tid, bucket=None):
         """To-do `tid` in `bucket` (default the project), refetched: content (its name), description, assignees, creator,
-        completed, completion, status, and the bucket (project) it is in."""
+        completed, completion, status, due_on, repetition_schedule, its parent (list) and the bucket (project) it is in."""
         return self.bc("api", "get", f"/buckets/{bucket or self.project}/todos/{tid}.json", project=bucket) or {}
 
     def assigned_todo_buckets(self):
@@ -976,6 +976,46 @@ class Tools:
         return sorted(k for k, r in self.load("todos.json", {}).items()
                       if r.get("request") and not r.get("completed") and not r.get("closed"))
 
+    def previous_occurrence(self, tid, todo, bucket=None):
+        """The completed request that repeating to-do `tid` is the next occurrence of, as (key, its todos.json entry).
+
+        Basecamp schedules a repeating to-do itself: completing one makes the next as a
+        new to-do (a new id) in the same list with the same name and repetition rule, and
+        that making raises no event. The match is the completed repeating request in the
+        same project and list with the same name that no later occurrence followed yet,
+        the latest completed; a to-do Basecamp reused (completed, then open again) is
+        its own previous occurrence. A request of the series still open here (the sweep
+        reads new to-dos before it notices a completion) is read first: its last comments,
+        then its closing. (None, None) for a to-do that does not repeat, or with no such
+        request.
+        """
+        if not todo_schedule(todo)["repeats"]:
+            return None, None
+        parent = (todo.get("parent") or {}).get("id")
+
+        def series(rec):
+            return (rec.get("request") and rec.get("repeats") and rec.get("parent") == parent
+                    and rec.get("title") == todo.get("content")
+                    and str(rec.get("bucket") or self.project) == str(bucket or self.project))
+
+        for key in self.request_keys():
+            rec = self.load("todos.json", {})[key]
+            if rec.get("todo") != tid and series(rec):
+                self.read_todo_comments(keys=[key])
+                self.refresh_todo_request(key)
+        found = []
+        for key, rec in self.load("todos.json", {}).items():
+            if not (rec.get("request") and rec.get("repeats") and rec.get("completed")
+                    and rec.get("closed") in (None, "completed")):
+                continue
+            same = rec.get("todo") == tid
+            if same or (rec.get("next") is None and series(rec)):
+                found.append((same, rec.get("completed"), key, rec))
+        if not found:
+            return None, None
+        _, _, key, rec = max(found, key=lambda f: f[:2])
+        return key, rec
+
     def read_todo_request(self, tid, by=None, bucket=None):
         """Record to-do `tid` as a `todo-request` once, when it is open, assigned to the acting user, and `by` is listened to.
 
@@ -985,7 +1025,11 @@ class Tools:
         read or posted on it goes there, and every record of it carries the project. A new request is tracked in todos.json as
         "request-<id>" with a cursor of 0, so the comments already on it are relayed as
         part of it, and the to-do is queued for a 👀. A closed request assigned again is
-        a new request under the same key. Returns True when recorded; False for an
+        a new request under the same key. A scheduled to-do's record carries its due date
+        and, when it repeats, Basecamp's rule (`due_on`, `repeats`); the next occurrence of
+        a repeating request the agent or anyone completed is a new request that `follows`
+        it, asked by whoever asked for the one before (Basecamp made it, so its creator is
+        not who asked). Returns True when recorded; False for an
         open request already tracked, a to-do assigned to someone else, or one not
         assigned by someone listened to (the sweep remembers those in
         assigned-todos.json, so it fetches each once). A dry run records nothing.
@@ -1003,8 +1047,11 @@ class Tools:
         if (todo.get("completed") or todo.get("status") not in (None, "active")
                 or me not in [a.get("id") for a in todo.get("assignees") or []]):
             return False
+        prev_key, prev = self.previous_occurrence(tid, todo, bucket)
         creator = todo.get("creator") or {}
         who = creator if by is None or by == creator.get("id") else {"id": by, "name": None}
+        if prev is not None and by is None:
+            who = (prev.get("request") or {}).get("author") or who
         if not self.hears(who, admitted=False):
             if by is None and not self.dry:
                 state = self.load("assigned-todos.json", {})
@@ -1018,15 +1065,19 @@ class Tools:
         with self.locked("todos.json"):
             state = self.load("todos.json", {})
             rec = state.get(key) or {"todo": tid, "cursor": 0, "created": todo.get("created_at")}
-            for k in ("completed", "closed"):
+            for k in ("completed", "closed", "next"):
                 rec.pop(k, None)
             n = rec.get("requests", 0) + 1
             rec.update(title=todo.get("content"), url=todo.get("app_url"), digest=todo_digest(todo), requests=n,
                        request=self.author(who), bucket=int(bucket or self.project),
-                       project_name=(todo.get("bucket") or {}).get("name") or rec.get("project_name"))
+                       project_name=(todo.get("bucket") or {}).get("name") or rec.get("project_name"),
+                       parent=(todo.get("parent") or {}).get("id"), **todo_schedule(todo))
+            if prev_key is not None and prev_key != key:
+                state[prev_key]["next"] = tid
             if [tid, EYES] not in [a[:2] for a in rec.get("acked", [])] + rec.get("ack", []):
                 rec.setdefault("ack", []).append([tid, EYES])
-            self.record({"kind": "todo-request", "key": key, "todo": tid, "n": n, "reopened": n > 1,
+            self.record({"kind": "todo-request", "key": key, "todo": tid, "n": n, "reopened": n > 1 and prev is None,
+                         "follows": prev["todo"] if prev else None, **todo_schedule(todo),
                          "title": todo.get("content"), "text": plain(todo.get("description")),
                          "assignees": [a.get("name") for a in todo.get("assignees") or []],
                          "url": todo.get("app_url"), "at": todo.get("updated_at") or todo.get("created_at"),
@@ -1065,9 +1116,9 @@ class Tools:
         user: a `todo-request-closed` record (`reason` completed, trashed, archived or
         unassigned, and who completed it when Basecamp says), and the request stops
         being read; completed also marks it completed, so `todo complete` is not needed.
-        Its name or description changed: a `todo-request-update` record with the new
-        text. `by` is who did it, when an event says; otherwise Basecamp does not say who
-        edited it. A dry run records nothing. Returns the record kind, or None.
+        Its name or description changed, or (for one tracked with its schedule) its due date
+        or repetition rule: a `todo-request-update` record with the new text and schedule.
+        `by` is who did it, when an event says; otherwise Basecamp does not say who edited it. A dry run records nothing. Returns the record kind, or None.
         """
         me = self.agent()
         rec = self.load("todos.json", {}).get(key)
@@ -1086,9 +1137,17 @@ class Tools:
             reason = todo.get("status")
         elif me not in [a.get("id") for a in todo.get("assignees") or []]:
             reason = "unassigned"
-        elif todo_digest(todo) != rec.get("digest"):
+        elif todo_digest(todo) != rec.get("digest") or ("due_on" in rec and todo_schedule(todo) != {
+                k: rec.get(k) for k in ("due_on", "repeats")}):
             reason = None
         else:
+            if "due_on" not in rec and not self.dry:
+                # Tracked before requests kept their schedule and list: keep them now, so a later move of the due date
+                # is an update and Basecamp's next occurrence of a repeating one follows it.
+                with self.locked("todos.json"):
+                    state = self.load("todos.json", {})
+                    state[key].update(todo_schedule(todo), parent=(todo.get("parent") or {}).get("id"))
+                    self.save_json("todos.json", state)
             return None
         kind = "todo-request-closed" if reason else "todo-request-update"
         if self.dry:
@@ -1101,7 +1160,7 @@ class Tools:
             out = {"kind": kind, "key": key, "todo": rec["todo"], "n": rec.get("requests", 1),
                    "title": todo.get("content") or rec.get("title"), "url": todo.get("app_url") or rec.get("url"),
                    "at": (todo.get("completion") or {}).get("created_at") or todo.get("updated_at"),
-                   "project": request_project(rec), **authored}
+                   "project": request_project(rec), **todo_schedule(todo), **authored}
             if reason:
                 out["reason"] = reason
                 rec["closed"] = reason
@@ -1109,7 +1168,7 @@ class Tools:
                     rec["completed"] = now_iso()
             else:
                 out["text"] = plain(todo.get("description"))
-                rec.update(digest=todo_digest(todo), title=todo.get("content") or rec.get("title"))
+                rec.update(digest=todo_digest(todo), title=todo.get("content") or rec.get("title"), **todo_schedule(todo))
             self.record(out)
             self.save_json("todos.json", state)
         self.log(f"todo request {key}: {kind}" + (f" ({reason})" if reason else ""))
@@ -1583,6 +1642,19 @@ class Tools:
         self.log(f"todo complete {key}: completed todo {rec['todo']}")
         return True
 
+    def todo_show(self, ref, out=print):
+        """Print a tracked to-do as Basecamp has it now, as JSON: whether it is open, its name and description, and its
+        due date and repetition rule. Basecamp alone owns a to-do's schedule, so a date read earlier may have moved."""
+        self.need_todos()
+        key, rec = self.tracked(ref)
+        todo = self.todo(rec["todo"], rec.get("bucket"))
+        me = self.agent()
+        out(json.dumps({"key": key, "todo": rec["todo"], "title": todo.get("content"), "text": plain(todo.get("description")),
+                        "open": not todo.get("completed") and todo.get("status") in (None, "active"),
+                        "assigned_to_you": me is not None and me in [p.get("id") for p in todo.get("assignees") or []],
+                        **todo_schedule(todo), "url": todo.get("app_url")}, indent=1))
+        return True
+
     def post_message(self, subject, body):
         """Post a message (`body` as Markdown, rendered by the CLI) on the configured "message_board"."""
         if self.message_board is None:
@@ -1638,6 +1710,15 @@ def request_project(rec):
 def todo_digest(todo):
     """A digest of a to-do's name and description, to notice an edit to either."""
     return hashlib.sha256(f"{todo.get('content') or ''}\n{todo.get('description') or ''}".encode()).hexdigest()
+
+
+def todo_schedule(todo):
+    """A to-do's schedule, for a request: `due_on` (None when undated) and `repeats`, Basecamp's repetition rule without
+    its empty fields (None when it does not repeat)."""
+    rule = todo.get("repetition_schedule")
+    repeats = ({k: v for k, v in rule.items() if v not in (None, [], "")}
+               if isinstance(rule, dict) and rule.get("frequency") else None)
+    return {"due_on": todo.get("due_on"), "repeats": repeats}
 
 
 def plain(content):
