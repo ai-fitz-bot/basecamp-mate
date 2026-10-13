@@ -77,6 +77,7 @@ policy. Each does one thing to the configured account and project:
 | `sync.py todo track` | command | tracks an existing to-do under a key, without relaying its old comments |
 | `sync.py todo comment` | command | comments on a tracked to-do |
 | `sync.py todo complete` | command | completes a tracked to-do (a decision to-do, or a to-do request when the work is done) |
+| `sync.py todo show` | command | reads a tracked to-do as Basecamp has it now (open or not, due date, repetition rule), read-only |
 | `sync.py post-message` | command | posts a message (subject and body) on the configured message board |
 | `sync.py status` | command | lists the sync runs on this computer, what each watches and with which login, and any `sync.py` running unrecorded (see "One home per project and login") |
 | `sync.py unmonitored list\|handle\|forget` | command | lists the unmonitored-event keys, marks one handled with the owner's decision, or drops one so it is raised again |
@@ -354,7 +355,8 @@ and who assigned it), acknowledged with a 👀 on the to-do, and tracked in `tod
 `request-<to-do id>`. From then on it is read like a tracked to-do: comments by the people
 listened to arrive as `todo-comment` records and their boosts as `boost` records, both
 with `"request": true` and the to-do's `title`; an edit to its name or description arrives as
-`todo-request-update` with the new text; and its closing as `todo-request-closed`, with a
+`todo-request-update` with the new text (and a moved due date or changed repetition rule, with
+the new schedule); and its closing as `todo-request-closed`, with a
 `reason`: `completed` (by anyone; who, when Basecamp says), `trashed`, `archived` or
 `unassigned` (no longer assigned to the agent). A closed request is no longer read. The
 agent answers with `sync.py reply --recording <comment>` or `sync.py todo comment --todo
@@ -366,6 +368,34 @@ assignment or completion is never unmonitored.
 
 Who assigned it decides how the agent treats it: from the captain it is captain work; from
 another listed person it is information or a request to weigh, never a captain decision.
+
+**Scheduled to-dos.** A request with a due date is scheduled: every request record carries
+`due_on` (null when undated), and the agent does the work on that date, not before when
+the description says so, leaving the to-do open until then. Some scheduled to-dos also
+repeat on a schedule Basecamp keeps (set in Basecamp's *Repeat* block): their records carry
+`repeats`, Basecamp's `repetition_schedule` without its empty fields (`frequency`, `days`
+with 0 for Sunday, `start_date`, `end_date`, intervals), and null for one that does not
+repeat. Basecamp alone owns the schedule; the sync and the agent keep no copy of it as
+authority. A record shows the due date and rule as read then, and a change in Basecamp
+(the due date moved, the rule changed or removed) arrives as a `todo-request-update`
+carrying the new `due_on` and `repeats`. Before acting on the day, the agent re-reads the
+to-do with `sync.py todo show --todo request-<id>` (read-only: whether it is open and
+assigned to the agent, its due date and rule now) rather than trusting a date it saved.
+
+When a repeating to-do is completed (by the agent with `todo complete`, or by anyone),
+Basecamp makes the next occurrence itself: a **new to-do** (a new id) in the same list with
+the same name, rule and assignees, due on the next date. That making raises no event or
+notification, so the 5-minute sweep finds it in `/my/assignments.json`. It is recorded once
+as a new `todo-request` with `follows` set to the to-do id of the occurrence it continues,
+and attributed to whoever asked for that occurrence: Basecamp's copy does not say who asked,
+so its creator does not decide whether it is heard. The match is the completed repeating
+request in the same project and list with the same name that no other to-do has followed
+yet; one still open here (completed since the last sweep) has its last comments and its
+closing read first. A to-do Basecamp reuses (completed, then open again with a new due date)
+is its own next occurrence: a new request under the same key, with `follows` its own id and
+`reopened` false. The agent comments the results, completes the to-do, and never creates the
+next occurrence. Other repeating Basecamp objects (check-ins, schedule events) are not
+to-do requests.
 
 **Anywhere in the account.** With `"assigned_todos": {"scope": "account"}` (`init
 --assigned-todos-anywhere`), a to-do assigned to the agent's login in *any* project of the
@@ -473,7 +503,9 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   move the cursor. `sync.py reply --recording <comment id>` answers one with a comment on
   the to-do (Markdown) and removes the 👀; `sync.py todo comment --todo <key or id>
   --body-file <file>` posts any other comment; `sync.py todo complete --todo <key or id>`
-  completes it, after which its comments are no longer read. `sync.py todo track --key
+  completes it, after which its comments are no longer read. `sync.py todo show --todo <key
+  or id>` prints it as Basecamp has it now (open, assigned to the acting login, due date,
+  repetition rule), reading only. `sync.py todo track --key
   <key> --todo <id>` adopts a to-do made some other way: its existing comments are skipped
   and only later ones are recorded. Only tracked to-dos can be commented on or completed;
   to-dos are never deleted, trashed or archived. All of these post nothing with no
@@ -913,7 +945,10 @@ then hourly, stale, removed and recycled-pid claims, the override, dry runs, com
 `sync.py status`, and `doctor`'s overlap check;
 `tests/test_assigned_todos.py` covers to-do requests with a stubbed `/my/assignments.json`:
 the sweep, who assigned it, comments, boosts, edits and closing, reassignment, the agent
-completing it, the `Assignment` and `Completion` notifications, and their notes, plus the account-wide
+completing it, the `Assignment` and `Completion` notifications, and their notes, scheduled
+and repeating to-dos (`due_on` and `repeats` on the records, a moved due date or changed rule
+as an update, Basecamp's next occurrence recorded once as a request that `follows` the
+completed one, a reused to-do, `todo show`), plus the account-wide
 scope (a request in another project carrying its project, its comments, boosts, replies,
 edits and closing in that project) and the unchanged project default. The `basecamp`, `gh` and `lavish-axi` CLIs are stubbed, and `init`'s systemd and check
 registration sit behind a fake; tests make no network calls and touch no real home.
@@ -960,17 +995,22 @@ decision or an approval.
   with `sync.py reply --recording <comment>`.
 - `todo-request`: `key` (`request-<to-do id>`), `todo` (id), `n` (how many times it was
   assigned; `reopened` when more than once), `title`, `text` (the description), `assignees`
-  (names), `url`, `at`, `project` (`{"id", "name"}`, the project it is in); `author` is who
-  assigned it. A to-do assigned to the agent's login is
+  (names), `url`, `at`, `project` (`{"id", "name"}`, the project it is in), `due_on` (its due
+  date, or null), `repeats` (Basecamp's repetition rule, or null) and `follows` (the to-do id
+  of the repeating to-do's occurrence this one is next after, or null); `author` is who
+  assigned it (for a next occurrence, whoever asked for the one before). A to-do assigned to the agent's login is
   a request: captain work when `captain` is true, a request to weigh otherwise. Complete it
   with `sync.py todo complete --todo <key>` when the work is done. Its later comments and
   boosts are `todo-comment` and `boost` records with `request: true`, `title` and `project`.
+  A scheduled one is done on its due date as Basecamp shows it then (`sync.py todo show`);
+  a repeating one is completed when done, and Basecamp makes the next occurrence.
 - `todo-request-update`: `key`, `todo`, `n`, `title`, `project`, `text` (the new description), `url`,
-  `at`; `author` is null (Basecamp does not say who edited it). The request's
-  name or description changed.
+  `at`, `due_on`, `repeats`; `author` is null (Basecamp does not say who edited it). The request's
+  name, description, due date or repetition rule changed.
 - `todo-request-closed`: `key`, `todo`, `n`, `title`, `project`, `reason` (`completed`, `trashed`,
-  `archived` or `unassigned`), `url`, `at`; `author` is who completed it, when known, else
-  null. The request is closed and no longer read; nothing is left to complete.
+  `archived` or `unassigned`), `url`, `at`, `due_on`, `repeats`; `author` is who completed it,
+  when known, else null. The request is closed and no longer read; nothing is left to
+  complete. When it repeats, Basecamp's next occurrence arrives as a new `todo-request`.
 - `message-comment`: `message` (id), `subject`, `comment` (id), `question`, `url` (the
   comment), `text`, `at`. The owner commented on a post the agent made, usually feedback
   or an instruction on a report; act on it and answer with `sync.py reply --recording <comment>`.

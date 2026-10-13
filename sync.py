@@ -51,6 +51,7 @@ Usage: sync.py --home <home> --config <config.json> [--all] [--dry-run] [--inclu
        sync.py todo track --home <home> --config <config.json> --key <key> --todo <id> [--dry-run]
        sync.py todo comment --home <home> --config <config.json> --todo <key or id> --body-file <file> [--dry-run]
        sync.py todo complete --home <home> --config <config.json> --todo <key or id> [--dry-run]
+       sync.py todo show --home <home> --config <config.json> --todo <key or id>
        sync.py post-message --home <home> --config <config.json> --subject <text> --body-file <file> [--dry-run]
        sync.py unmonitored list|handle|forget --home <home> --config <config.json> [--key <key>] [--decision <text>] [--dry-run]
        sync.py behaviors --home <home> --config <config.json>
@@ -209,9 +210,10 @@ def todo_cli(argv, runner):
     descs = {"create": "Create a to-do assigned to the owner and track it under a key.",
              "track": "Track an existing to-do under a key; its comments so far are not relayed.",
              "comment": "Comment on a tracked to-do.",
-             "complete": "Mark a tracked to-do complete."}
+             "complete": "Mark a tracked to-do complete.",
+             "show": "Print a tracked to-do as Basecamp has it now: open or not, due date, repetition rule."}
     if sub not in descs:
-        print("usage: sync.py todo {create,track,comment,complete} --home <home> --config <config.json> ...", file=sys.stderr)
+        print("usage: sync.py todo {create,track,comment,complete,show} --home <home> --config <config.json> ...", file=sys.stderr)
         return 2
     ap = common(f"sync.py todo {sub}", descs[sub])
     if sub in ("create", "track"):
@@ -232,7 +234,8 @@ def todo_cli(argv, runner):
     calls = {"create": lambda s: s.todo_create(a.key, a.title, read(a.body_file) if a.body_file else "", a.list, a.due),
              "track": lambda s: s.todo_track(a.key, a.todo),
              "comment": lambda s: s.todo_comment(a.todo, read(a.body_file)),
-             "complete": lambda s: s.todo_complete(a.todo)}
+             "complete": lambda s: s.todo_complete(a.todo),
+             "show": lambda s: s.todo_show(a.todo)}
     return command(a, f"todo {sub}", calls[sub], runner)
 
 

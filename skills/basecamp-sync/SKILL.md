@@ -1,6 +1,6 @@
 ---
 name: basecamp-sync
-description: Operating contract for a firstmate or second mate whose home mirrors its backlog into a Basecamp project with basecamp-mate (formerly firstmate-basecamp-sync). Use when told to "use this Basecamp project", when setting a home up with `sync.py init` or `basecamp-mate setup`, when checking a home with `basecamp-mate doctor` or `basecamp-mate status`, when the basecamp-sync wake check fires, when handling data/basecamp-sync/pending-comments.jsonl, when putting a decision to the owner as a Basecamp to-do (`sync.py todo`), when posting a report to the Message Board (`sync.py post-message`), when handling an `unmonitored` record (`sync.py unmonitored`), a `ping` record (the owner's direct message), a `mention` or `thread-comment` record (the owner writing on something the agent follows) or a `todo-request` record (a to-do assigned to the agent), or when editing figuring.json, not-now.json, decisions.json, boards.json, extra-repos.json or skip.json.
+description: Operating contract for a firstmate or second mate whose home mirrors its backlog into a Basecamp project with basecamp-mate (formerly firstmate-basecamp-sync). Use when told to "use this Basecamp project", when setting a home up with `sync.py init` or `basecamp-mate setup`, when checking a home with `basecamp-mate doctor` or `basecamp-mate status`, when the basecamp-sync wake check fires, when handling data/basecamp-sync/pending-comments.jsonl, when putting a decision to the owner as a Basecamp to-do (`sync.py todo`), when posting a report to the Message Board (`sync.py post-message`), when handling an `unmonitored` record (`sync.py unmonitored`), a `ping` record (the owner's direct message), a `mention` or `thread-comment` record (the owner writing on something the agent follows) or a `todo-request` record (a to-do assigned to the agent, including a scheduled or repeating one), or when editing figuring.json, not-now.json, decisions.json, boards.json, extra-repos.json or skip.json.
 ---
 
 # Basecamp sync
@@ -130,6 +130,18 @@ work is done, comment what was done with full links, then
 `sync.py todo complete --todo <key>` (the key is `request-<to-do id>`). To-dos assigned to
 anyone else are ignored.
 
+**Scheduled to-dos.** Every request record carries `due_on` (null when undated) and
+`repeats` (Basecamp's repetition rule, null when it does not repeat). A scheduled request
+is done on its due date, not before when its description says so; it stays open until
+then. Basecamp alone owns the schedule: a moved due date or a changed or removed rule
+arrives as a `todo-request-update` with the new `due_on` and `repeats`, and on the day,
+before acting, re-read it with `sync.py todo show --todo <key>` (read-only) instead of
+trusting a date saved earlier. For a repeating to-do, do the occurrence on its date,
+comment the results with full links, and `todo complete` it; Basecamp makes the next
+occurrence as a new to-do, which the sweep records once as a new `todo-request` with
+`follows` (the to-do id it comes after), attributed to whoever asked for the series.
+Never create the next occurrence by hand.
+
 **Account-wide** (`"assigned_todos": {"scope": "account"}`, `init --assigned-todos-anywhere`):
 a to-do assigned to the login in any project of the account is a request, and every record
 of it carries `project` (`id`, `name`); comments, boosts, edits and closing follow it there,
@@ -202,7 +214,8 @@ that read.
 - `todo-comment`: the captain commented on a tracked to-do; see "Decisions as to-dos", or,
   with `request: true`, "To-do requests".
 - `todo-request`, `todo-request-update`, `todo-request-closed`: a to-do assigned to this
-  home's login, an edit to it, or its closing; see "To-do requests".
+  home's login (with `due_on`, `repeats` and, for a repeating to-do's next occurrence,
+  `follows`), an edit to it (its text or its schedule), or its closing; see "To-do requests".
 - `message-comment`: the captain commented on a Message Board post this home made (a
   report); it is feedback or an instruction on it. Act on it (relaying first outside the
   main firstmate's home), then answer with `sync.py reply --recording <comment id>`.

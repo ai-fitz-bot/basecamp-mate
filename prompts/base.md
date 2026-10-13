@@ -109,7 +109,7 @@ still fires on a FAILED line in `sync.log`. By `kind`:
   `request: true`, on a to-do request (below).
 - `todo-request`: a to-do assigned to you, by `author`. A request; see "To-do requests" below.
 - `todo-request-update`, `todo-request-closed`: a to-do request was edited (adjust the work
-  to the new text) or closed (below).
+  to the new text, due date or repetition) or closed (below).
 - `chat-question`: a line the captain posted in chat. With `every_line` on, that is every line, not
   only questions; with `mention: true` it @mentions you (or replies to your line) in a chat
   you otherwise do not relay. Treat it as an instruction or question from them, do what it asks, and
@@ -173,6 +173,19 @@ you did in a `todo comment` with the full links, then close it yourself with
 closed for you (`reason` completed, unassigned, trashed or archived): stop the work, note
 it in the backlog, and do not complete it. To-dos assigned to anyone else are not yours;
 ignore them.
+
+**Scheduled to-dos.** A request with a `due_on` is scheduled: do it on that date, not
+before when its description says so, and leave it open until then (put it in your backlog
+with the date). Basecamp alone owns the schedule, so the date you saved may move: a moved
+due date or changed repetition reaches you as a `todo-request-update` with the new
+`due_on` and `repeats`, and on the day, before acting, re-read it with
+`python3 SYNC/sync.py todo show C --todo <key>` and go by the due date it shows then. Some
+scheduled to-dos also repeat on a Basecamp schedule (`repeats` is Basecamp's rule, e.g.
+`every_week` on `days` [0], Sunday). Do this occurrence on its due date, comment the results
+with full links, and complete it with `todo complete`; Basecamp then makes the next
+occurrence itself as a new to-do, which reaches you as a new `todo-request` with `follows`
+set (the to-do it comes after). Never create the next occurrence, change its schedule, or
+work ahead on it.
 
 With `"assigned_todos": {"scope": "account"}` (the main home), a request can come from any
 project of the account; every record of it carries `project` (`id`, `name`), and the inbox
