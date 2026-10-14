@@ -350,6 +350,13 @@ class InitTest(unittest.TestCase):
         cfg, _ = self.init(assigned_anywhere=True).discover()
         self.assertEqual(cfg["assigned_todos"], {"scope": "account"})
 
+    def test_advisories_flag_lists_the_repositories_and_refuses_a_bad_one(self):
+        cfg, _ = self.init(advisories=["acme/server", "acme/app", "acme/server"]).discover()
+        self.assertEqual(cfg, EXPECTED | {"advisories": {"repos": ["acme/app", "acme/server"]}})
+        self.assertNotIn("advisories", self.init().discover()[0])
+        with self.assertRaises(init_home.Refuse):
+            self.init(advisories=["server"])
+
     def test_upgrade_removes_the_listener_service_and_drops_listen_without_force(self):
         listener = init_home.unit_name(self.home) + "-listen"
         self.init().main()

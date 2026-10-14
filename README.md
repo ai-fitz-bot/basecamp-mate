@@ -96,8 +96,8 @@ agent's side of each is in [`prompts/base.md`](prompts/base.md).
 The timer runs `run.sh` every 30 seconds, and each behavior's step runs when it is due
 (`timer.json` keeps when each last ran): `notifications` and `inbox-delivery` every run;
 `card-mirror`, `release-announcements`, `checkin-answering` and `assigned-todos` every 5
-minutes; and `chat-inbox`, `decision-todos`, `reports` and `pings` hourly, as the repair
-sweep behind `notifications`, which reads their surfaces as soon as something changes.
+minutes; `security-advisories` hourly; and `chat-inbox`, `decision-todos`, `reports` and
+`pings` hourly, as the repair sweep behind `notifications`, which reads their surfaces as soon as something changes.
 Without `notifications` (no `profile`, or `"notifications": false`) those four run every
 5 minutes instead. `sync.py --all` runs every step at once.
 
@@ -108,6 +108,7 @@ Without `notifications` (no `profile`, or `"notifications": false`) those four r
 | `chat-inbox` | `chats` | default; `--every-line` | chat reader (hourly sweep) | `reply` to each line |
 | `chat-asks` | `ask_chat` | by hand | none | `ask` |
 | `release-announcements` | `releases` | default, when the dock has one message board | post one message per new GitHub release | none |
+| `security-advisories` | `advisories` | `--advisories <owner/name>` (repeatable) | record each new GitHub security advisory once (hourly) | route it to the repo's owner; severity, fix and disclosure decisions go to the captain |
 | `checkin-answering` | `checkins` | `--checkins <time zone>` | check-in reader (5 min) | `answer` |
 | `decision-todos` | `todos` | `--todos` | to-do comment reader (hourly sweep) | `todo create`, `reply`/`todo comment`, `todo complete` |
 | `assigned-todos` | `assigned_todos` | `--assigned-todos` (`--assigned-todos-anywhere`: account-wide) | to-do request readers, then the to-do comment reader for the requests (5 min) | take each request on; `todo comment`/`reply`; `todo complete` when done |
@@ -461,6 +462,19 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   post is logged and retried next run and never fails the sync. It posts even with no
   `profile` or a profile signed in as the captain: an announcement is not an
   acknowledgement. Merges and PRs are never announced.
+- Security advisories: for each GitHub repository in the optional `advisories` config,
+  each hourly run lists its repository security advisories (`gh api
+  repos/<owner>/<name>/security-advisories`, the newest 100) and records one `advisory`
+  record (repo, GHSA id, summary, severity, state, reporter, created date, link) per
+  advisory the first time it is seen in `triage` or `draft`: a report waiting on the
+  maintainers. `advisories.json` keeps each advisory's last seen state, so it surfaces once;
+  when one later moves to `published` or `closed` an `advisory-update` record follows, once.
+  Advisories already published or closed when first seen are not recorded. A repository
+  the `gh` login cannot read advisories for (HTTP 403 or 404: reading them needs admin or
+  security-manager access) is recorded once as `advisory-unreadable` and stays quiet until
+  it is readable again; any other failed read is logged and retried next run. The sync
+  never changes, publishes or comments on an advisory. Dependabot and code-scanning alerts
+  and the global advisory database are not read.
 - Chat questions: for each chat id in the optional `chats` config list, each run reads the
   chat's lines newer than a cursor kept in `chats.json` (the first run only sets the
   cursor, so older history is not relayed). A captain line that mentions the acting user
@@ -666,7 +680,8 @@ dock lacks what it needs: `--todos` (`todos` with the one enabled to-do set),
 discovered chat as `{"chat": <id>, "every_line": true}`) and `--checkins <IANA time zone>`
 (`checkins` with the one enabled Automatic Check-ins questionnaire). Without them the
 config is the same as before they existed, so re-running `init` on an older home changes
-nothing. `--no-releases` leaves `releases` out. `--inbox` adds `"inbox": {}` and installs
+nothing. `--no-releases` leaves `releases` out. `--advisories <owner/name>` (repeatable)
+adds `"advisories": {"repos": [...]}`. `--inbox` adds `"inbox": {}` and installs
 the failures-only wake check. `--listen` is still accepted and does nothing (notifications
 replaced the event listener); a config that differs from the discovered one only in a
 `"listen"` key is rewritten without it, no `--force` needed. `--pings` adds
@@ -795,6 +810,8 @@ or by hand from
   or {"name": "<name>", "note": "<text>"}}, "prereleases": false}`. The name is the
   subject's first word (capitalized; `init` uses the mapped board name) and the note is
   appended to the body, e.g. `` "note": "Run `ta upgrade` to install." ``.
+- `advisories` (optional): `{"repos": ["owner/name", ...]}`: record each new security
+  advisory of these GitHub repositories once. See Security advisories.
 - `cards` (optional): the card mirror's switch. Absent means on when `tables` is set and
   off otherwise; `false` turns it off even with `tables` present.
 - `repos` (card mirror): backlog repo name -> board name.

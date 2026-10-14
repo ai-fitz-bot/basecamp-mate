@@ -149,6 +149,16 @@ still fires on a FAILED line in `sync.log`. By `kind`:
   `python3 SYNC/sync.py unmonitored handle C --key '<key>' --decision "<what they decided>"`,
   and complete the to-do. If they want to be asked again next time,
   `python3 SYNC/sync.py unmonitored forget C --key '<key>'` instead.
+- `advisory`: a GitHub security advisory on `repo` (`ghsa`, `summary`, `severity`, `state`
+  triage or draft, `reporter`, link) seen for the first time. It is security-sensitive work. Route it to whoever owns the repository (the home or domain that
+  works on it), validate the report privately, and bring severity, fix and disclosure
+  decisions to the captain (a decision to-do, section 3). Never change an advisory's state,
+  publish it, request a CVE or comment on it without the captain's word, and keep its
+  details out of public places (issues, PRs, chats others read) until it is published.
+- `advisory-update`: an advisory you were told about was published or closed (`previous`,
+  `state`); record the outcome and wrap up any work on it. Change nothing on GitHub.
+- `advisory-unreadable`: this login cannot read `repo`'s advisories; tell the captain it
+  needs admin or security-manager access, or the repo should leave the config.
 - `comment`, `question`, `approval` (card mirror only): their comment or 👍 on a card. Answer
   a question with `reply`; act on an approval as approving every recommendation on the card.
 - A FAILED line in `sync.log`: read it. A token failure needs `basecamp auth login -P firstmate`,

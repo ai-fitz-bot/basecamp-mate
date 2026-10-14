@@ -1,6 +1,6 @@
 ---
 name: basecamp-sync
-description: Operating contract for a firstmate or second mate whose home mirrors its backlog into a Basecamp project with basecamp-mate (formerly firstmate-basecamp-sync). Use when told to "use this Basecamp project", when setting a home up with `sync.py init` or `basecamp-mate setup`, when checking a home with `basecamp-mate doctor` or `basecamp-mate status`, when the basecamp-sync wake check fires, when handling data/basecamp-sync/pending-comments.jsonl, when putting a decision to the owner as a Basecamp to-do (`sync.py todo`), when posting a report to the Message Board (`sync.py post-message`), when handling an `unmonitored` record (`sync.py unmonitored`), a `ping` record (the owner's direct message), a `mention` or `thread-comment` record (the owner writing on something the agent follows) or a `todo-request` record (a to-do assigned to the agent, including a scheduled or repeating one), or when editing figuring.json, not-now.json, decisions.json, boards.json, extra-repos.json or skip.json.
+description: Operating contract for a firstmate or second mate whose home mirrors its backlog into a Basecamp project with basecamp-mate (formerly firstmate-basecamp-sync). Use when told to "use this Basecamp project", when setting a home up with `sync.py init` or `basecamp-mate setup`, when checking a home with `basecamp-mate doctor` or `basecamp-mate status`, when the basecamp-sync wake check fires, when handling data/basecamp-sync/pending-comments.jsonl, when putting a decision to the owner as a Basecamp to-do (`sync.py todo`), when posting a report to the Message Board (`sync.py post-message`), when handling an `unmonitored` record (`sync.py unmonitored`), a `ping` record (the owner's direct message), a `mention` or `thread-comment` record (the owner writing on something the agent follows) a `todo-request` record (a to-do assigned to the agent, scheduled or repeating too) or an `advisory` record, or when editing figuring.json, not-now.json, decisions.json, boards.json, extra-repos.json or skip.json.
 ---
 
 # Basecamp sync
@@ -233,6 +233,14 @@ that read.
   the sync: relay it to the main firstmate), then record it with
   `python3 $SYNC/sync.py unmonitored handle --home <home> --config <config> --key '<key>' --decision <text>`
   so that kind stays quiet; `unmonitored forget --key '<key>'` raises it again next time.
+- `advisory`, `advisory-update`, `advisory-unreadable` (`advisories` config): a GitHub
+  security advisory first seen in triage or draft, its later publishing or closing, or a
+  repository whose advisories this login cannot read (reported once). An advisory is
+  security-sensitive work. Route it to whoever owns the repository (the home or domain that
+  works on it), validate the report privately, and bring severity, fix and disclosure
+  decisions to the captain (a decision to-do, see "Decisions as to-dos"). Never change an advisory's state,
+  publish it, request a CVE or comment on it without the captain's word, and keep its
+  details out of public places (issues, PRs, chats others read) until it is published.
 - `checkin`: a check-in question came due today. Work out the answer within this home's
   scope and post it once with
   `python3 $SYNC/sync.py answer --home <home> --config <home>/data/basecamp-sync/config.json --question <question id> --body-file <file>`.

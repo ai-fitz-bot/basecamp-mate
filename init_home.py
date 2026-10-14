@@ -32,7 +32,8 @@ relays the owner's Pings (direct messages) to the --login, which live outside th
 project. --assigned-todos treats a to-do the owner assigns to the --login in the
 project as a request: relayed, acknowledged and tracked until done;
 --assigned-todos-anywhere does so in every project of the account (only one home per
-login should: the main one, which routes each request to the right domain). --listen-to <person> (repeatable: a person id, email or exact name) adds
+login should: the main one, which routes each request to the right domain). --advisories
+<owner/name> (repeatable) records each new GitHub security advisory of that repository once. --listen-to <person> (repeatable: a person id, email or exact name) adds
 people the sync listens to besides the captain, as "people"; their input is relayed
 with who wrote it, but only the captain decides or approves. --operator <person> (the same
 forms) names someone whose word authorizes the agent as the captain's does, as
@@ -221,7 +222,7 @@ class Init:
     def __init__(self, url, login, home, captain=None, listen_to=(), operators=(), participants_project=False,
                  participants_domains=(), repo_map=(), create_missing=False, dry=False,
                  force=False, cards=True, todos=False, reports=False, every_line=False, checkins=None, releases=True, inbox=False,
-                 pings=False, assigned_todos=False, assigned_anywhere=False, chats=True, no_keyring=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
+                 pings=False, assigned_todos=False, assigned_anywhere=False, advisories=(), chats=True, no_keyring=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
         self.account, self.project = parse_url(url)
         self.login, self.home = login, os.path.abspath(home)
         self.captain_arg, self.listen_to, self.operator_args = captain, list(listen_to), list(operators)
@@ -243,6 +244,10 @@ class Init:
         self.releases, self.inbox, self.pings = releases, inbox, pings
         self.assigned_todos, self.assigned_anywhere = assigned_todos or assigned_anywhere, assigned_anywhere
         self.chats = chats
+        self.advisories = sorted(set(advisories))
+        bad = [r for r in self.advisories if not re.fullmatch(r"[^/\s]+/[^/\s]+", r)]
+        if bad:
+            raise Refuse(f"--advisories takes a GitHub repository as owner/name, got {', '.join(bad)}")
         self.no_keyring = bool(os.environ.get("BASECAMP_NO_KEYRING")) if no_keyring is None else no_keyring
         if checkins is not None:
             try:
@@ -382,6 +387,8 @@ class Init:
             cfg["pings"] = {}
         if self.assigned_todos:
             cfg["assigned_todos"] = {"scope": "account"} if self.assigned_anywhere else {}
+        if self.advisories:
+            cfg["advisories"] = {"repos": self.advisories}
         if problems:
             raise Refuse("init refused, nothing was written:\n  - " + "\n  - ".join(problems))
         gh_repos = {}
@@ -603,6 +610,9 @@ def cli(argv, **kw):
     ap.add_argument("--assigned-todos-anywhere", action="store_true",
                     help="--assigned-todos in every project of the account, not just this one; run it in one home per "
                          "login only (the main home, which routes each request to the right domain)")
+    ap.add_argument("--advisories", action="append", default=[], metavar="OWNER/NAME",
+                    help="record each new security advisory (triage or draft) of this GitHub repository once, for the "
+                         "agent to route (repeatable); the gh login needs admin or security-manager access")
     ap.add_argument("--no-chats", action="store_true", help="leave the dock's chats out: no chat inbox")
     ap.add_argument("--no-keyring", action="store_true", default=None,
                     help="run the units with BASECAMP_NO_KEYRING=1 (the file credential store); "
@@ -619,7 +629,7 @@ def cli(argv, **kw):
              create_missing=a.create_missing_columns, dry=a.dry_run, force=a.force,
              cards=not a.no_cards, todos=a.todos, reports=a.reports, every_line=a.every_line,
              checkins=a.checkins, releases=not a.no_releases, inbox=a.inbox, pings=a.pings,
-             assigned_todos=a.assigned_todos, assigned_anywhere=a.assigned_todos_anywhere, chats=not a.no_chats, no_keyring=a.no_keyring, **kw).main()
+             assigned_todos=a.assigned_todos, assigned_anywhere=a.assigned_todos_anywhere, advisories=a.advisories, chats=not a.no_chats, no_keyring=a.no_keyring, **kw).main()
     except Refuse as e:
         print(e, file=sys.stderr)
         return 2
