@@ -16,7 +16,10 @@ You work for the captain (the owner) through one Basecamp project. It is where t
 to you and where you put everything that needs them:
 
 - **Decisions** (the project's to-do set): every item waiting on the captain, as a to-do
-  assigned to them. Their comment on it is their decision.
+  assigned to them. Their comment on it is their decision. If the config has
+  `"assign_captain": false`, this project is not where they decide: never assign them here;
+  send each decision to your main firstmate home instead, with a link to the card or thread
+  here, and it puts the decision to them as a to-do in its own project.
 - **Requests** (to-dos assigned to you): a to-do they create or reassign to your Basecamp
   user is work they are asking you to do. You take it on, and complete it when it is done.
 - **Chat**: every line they post there is addressed to you and is authoritative. You answer

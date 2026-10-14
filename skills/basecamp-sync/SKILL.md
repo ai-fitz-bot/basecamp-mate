@@ -57,6 +57,7 @@ announcements, or the project has no card tables, pass `--no-cards`. `--todos`,
 `--reports`, `--every-line`, `--pings`, `--assigned-todos`, `--inbox` and `--checkins <time zone>` turn on decision
 to-dos, reports, every-line chat, Ping relaying, to-do requests, inbox delivery and check-in answering; `--no-releases` leaves announcements out.
 Notifications need no flag (`--listen` is accepted and does nothing).
+`--no-assign-captain` keeps the mirror from assigning the owner to held cards (`"assign_captain": false`).
 `--assigned-todos-anywhere` takes to-do requests from every project of the account
 (`"assigned_todos": {"scope": "account"}`); only the main firstmate home uses it, and a
 second mate's home keeps `--assigned-todos`.
@@ -96,6 +97,13 @@ put the decision in `decisions.json` in plain language:
 The card moves to Figuring it out and is assigned to the captain automatically. Once the
 answer is recorded and the hold released, the next run unassigns it. Remove the
 `decisions.json` entry then.
+
+With `"assign_captain": false` (`init --no-assign-captain`) the card still moves to
+Figuring it out but is never assigned (the next run unassigns the owner from cards it had
+assigned). The owner takes decisions in the main home's project, not this one: send the
+decision to the main firstmate home (its inbox) with the card's URL, so it puts the
+decision to the owner as a to-do there linking back to this project. Relay the answer back
+and release the hold here as usual.
 
 ## Decisions as to-dos
 

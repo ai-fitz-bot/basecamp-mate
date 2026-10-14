@@ -104,7 +104,7 @@ Without `notifications` (no `profile`, or `"notifications": false`) those four r
 | Behavior | Config keys | `init` flag | Timer step | Agent side |
 | --- | --- | --- | --- | --- |
 | `notifications` | `profile` (off with `"notifications": false`) | default | every run: the notification and boost readers, then the reader for each thread that changed; mark read | records arrive within about 30 seconds; an `unmonitored` record becomes a decision to-do |
-| `card-mirror` | `tables`, `repos` (off with `"cards": false`) | default (`--no-cards` to leave off) | mirror the backlog; card comment and 👍 readers (5 min) | relay comments and approvals; `reply` |
+| `card-mirror` | `tables`, `repos` (off with `"cards": false`), `assign_captain` | default (`--no-cards` to leave off; `--no-assign-captain` never assigns the owner) | mirror the backlog; card comment and 👍 readers (5 min) | relay comments and approvals; `reply`; with `"assign_captain": false`, send each decision to the main home instead |
 | `chat-inbox` | `chats` | default; `--every-line` | chat reader (hourly sweep) | `reply` to each line |
 | `chat-asks` | `ask_chat` | by hand | none | `ask` |
 | `release-announcements` | `releases` | default, when the dock has one message board | post one message per new GitHub release | none |
@@ -189,11 +189,18 @@ Column rules:
 | --- | --- |
 | Queued | Triage |
 | Queued, listed in `figuring.json` | Figuring it out |
-| Held for the captain (`hold-kind: captain`, no until date) | Figuring it out, **assigned to the captain** |
+| Held for the captain (`hold-kind: captain`, no until date) | Figuring it out, **assigned to the captain** (unless `"assign_captain": false`) |
 | Parked, has an until date, or listed in `not-now.json` | Not now |
 | In flight | In progress |
 | In flight with `pr=` in `state/<task>.meta` | Ready for QA |
 | Done | Done |
+
+`"assign_captain": false` (`init --no-assign-captain`, or "No" to setup's card-assignment
+question) keeps a held card in Figuring it out but never assigns the owner, and the next run
+unassigns the owner (only the owner) from every card the mirror had assigned for a hold. Use it
+in a home whose project is not where the owner takes decisions: the agent sends each decision
+to its main home, which puts it to the owner as a to-do in its own project linking back here.
+The 👍 approval reader reads only assigned cards, so it is quiet there too.
 
 If an agent hosts a Lavish review board for a task, the card links it. Each run reads the
 live sessions once from plain `lavish-axi` (it has no machine-readable listing, so its

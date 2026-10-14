@@ -34,6 +34,8 @@ QUESTIONS = (
     ("todos", "Let the agent ask you for decisions as to-dos assigned to you?", True),
     ("checkins", "Let the agent answer the project's automatic check-in questions?", True),
     ("cards", "Mirror the agent's task list onto card tables (one per code repo)?", False),
+    ("assign", "Assign you to a card when its task waits on your decision? (No: the agent sends each decision to "
+               "its main home as a to-do instead)", True),
     ("releases", "Announce new GitHub releases on the Message Board?", False),
     ("reports", "Let the agent post reports on the Message Board?", False),
     ("pings", "Relay your Pings (direct messages) to the agent?", False),
@@ -41,7 +43,7 @@ QUESTIONS = (
 ANSWERS = ("home", "login", "account", "project", "captain", "timezone", "replace", "install_cli",
            "inbox", *(k for k, _, _ in QUESTIONS))
 LABELS = {"chat": "chat inbox", "todos": "decision to-dos", "checkins": "check-in answers",
-          "cards": "card mirror", "releases": "release announcements",
+          "cards": "card mirror", "assign": "card assignment for decisions", "releases": "release announcements",
           "reports": "Message Board reports", "pings": "Pings", "inbox": "firstmate inbox notes"}
 # The dock tool each behavior needs, and whether there must be exactly one.
 TOOLS = {"chat": ("chat", "Chat", False), "todos": ("todoset", "To-dos", True),
@@ -288,7 +290,10 @@ class Setup:
 
     def choose_behaviors(self):
         self.out("\nA few questions about what the agent should do (press Enter for the suggested answer):")
-        return {k: self.ask.yes(k, q, d) for k, q, d in QUESTIONS}
+        chosen = {}
+        for k, q, d in QUESTIONS:  # card assignment is asked only with the card mirror on
+            chosen[k] = self.ask.yes(k, q, d) if k != "assign" or chosen["cards"] else False
+        return chosen
 
     def ensure_tools(self, project, dock, chosen):
         """Turn on (or add) the dock tool each chosen behavior needs; returns the behaviors left off and why."""
@@ -373,6 +378,7 @@ class Setup:
             off["cards"] = "there is no code repo with a card table yet"
         for k in off:
             chosen[k] = False
+        chosen["assign"] = chosen["assign"] and chosen["cards"]
         config = os.path.join(home, "data", "basecamp-sync", "config.json")
         force = False
         if os.path.exists(config):
@@ -381,7 +387,7 @@ class Setup:
                 raise Stop("Nothing was changed.")
         printed = []
         init = Init(f"https://app.basecamp.com/{account}/projects/{project}", login, home, captain=captain,
-                    create_missing=chosen["cards"], force=force, cards=chosen["cards"], todos=chosen["todos"],
+                    create_missing=chosen["cards"], force=force, cards=chosen["cards"], assign_captain=chosen["assign"], todos=chosen["todos"],
                     reports=chosen["reports"], checkins=timezone if chosen["checkins"] else None,
                     releases=chosen["releases"], inbox=chosen["inbox"],
                     pings=chosen["pings"], chats=chosen["chat"], no_keyring=True,

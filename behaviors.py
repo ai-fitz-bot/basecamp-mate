@@ -45,7 +45,7 @@ class Behavior:
 class CardMirror(Behavior):
     """Mirror the backlog onto card tables; relay the listened-to people's card comments and the captain's (or an
     operator's) 👍 approvals."""
-    name, keys, every = "card-mirror", ("tables", "repos", "cards"), SLOW
+    name, keys, every = "card-mirror", ("tables", "repos", "cards", "assign_captain"), SLOW
 
     def __init__(self, t, cfg):
         super().__init__(t, cfg)
@@ -55,6 +55,11 @@ class CardMirror(Behavior):
             raise ValueError('config "cards" is on but there are no "tables"')
         self.tables = cfg.get("tables", {}) if self.on else {}
         self.repo_map = cfg.get("repos", {}) if self.on else {}
+        # "assign_captain": false keeps a captain-held card in Figuring it out without assigning the owner (and
+        # unassigns the owner from cards it assigned): decisions then reach them as to-dos from the main home instead.
+        self.assign = cfg.get("assign_captain", True)
+        if not isinstance(self.assign, bool):
+            raise ValueError('config "assign_captain" must be true or false')
         for board, tb in self.tables.items():
             missing = [c for c in ("table", *COLUMNS) if c not in tb]
             if missing:
@@ -123,6 +128,7 @@ class CardMirror(Behavior):
                 unplaced.append(f"{it['id']} (repo {it['repo'] or 'none'})")
                 continue
             col, waiting = self.column_for(it, notnow)
+            assign = waiting and self.assign
             if col == "Triage" and it["id"] in figuring:
                 col = "Figuring it out"
                 it = dict(it, hold=it["hold"] or figuring[it["id"]])
@@ -141,15 +147,15 @@ class CardMirror(Behavior):
                 if t.dry:
                     if rec is None:
                         plan["create"] += 1
-                        t.log(f"dry {key}: create -> {col}{' (assign)' if waiting else ''}")
+                        t.log(f"dry {key}: create -> {col}{' (assign)' if assign else ''}")
                     else:
                         acts = []
                         if rec.get("digest") != digest:
                             acts.append("update")
                         if rec.get("column") != col:
                             acts.append(f"move {rec.get('column')} -> {col}")
-                        if bool(rec.get("assigned")) != waiting:
-                            acts.append("assign" if waiting else "unassign")
+                        if bool(rec.get("assigned")) != assign:
+                            acts.append("assign" if assign else "unassign")
                         for a in acts:
                             plan[a.split()[0]] += 1
                         t.log(f"dry {key}: {', '.join(acts) or 'unchanged'} [{col}]")
@@ -160,8 +166,8 @@ class CardMirror(Behavior):
                     counts[repo] = counts.get(repo, 0) + 1
                     continue
                 if rec is None:
-                    card = t.card_create(tb["table"], tb[col], title, body, t.captain if waiting else None)
-                    rec = {"card": card, "column": col, "assigned": waiting, "digest": digest, "comments": [], "boards": boards}
+                    card = t.card_create(tb["table"], tb[col], title, body, t.captain if assign else None)
+                    rec = {"card": card, "column": col, "assigned": assign, "digest": digest, "comments": [], "boards": boards}
                     cards[key] = rec
                     t.log(f"created {key} card {card} in {col}")
                 else:
@@ -174,13 +180,13 @@ class CardMirror(Behavior):
                         t.card_move(rec["card"], tb["table"], tb[col])
                         t.log(f"moved {key} {rec.get('column')} -> {col}")
                         rec["column"] = col
-                    if bool(rec.get("assigned")) != waiting:
-                        if waiting:
+                    if bool(rec.get("assigned")) != assign:
+                        if assign:
                             t.card_assign(rec["card"], tb["table"])
                         else:
                             t.card_unassign(rec["card"])
-                        rec["assigned"] = waiting
-                        t.log(f"{'assigned' if waiting else 'unassigned'} {key}")
+                        rec["assigned"] = assign
+                        t.log(f"{'assigned' if assign else 'unassigned'} {key}")
                 self.read_card(it["id"], repo, key, rec)
                 counts[repo] = counts.get(repo, 0) + 1
                 t.save_json("map.json", cards)
