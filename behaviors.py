@@ -5,8 +5,8 @@ otherwise. It holds the policy: which readers run on the timer and how often, wh
 the card mirror shows, when a release is announced. The timer runs every 30 seconds;
 each behavior's step runs when its `every` has passed: notifications and inbox
 delivery every run, the card mirror, release announcements and check-ins every 5
-minutes (and the to-do request sweep), and the readers notifications take over hourly,
-as the repair sweep. Some
+minutes (and the to-do request sweep), and the security-advisory reader and the readers
+notifications take over hourly, as the repair sweep. Some
 behaviors have no timer step at all and are carried out by the agent with the tools
 (chat asks); the agent's side of every behavior is in prompts/base.md.
 
@@ -313,6 +313,75 @@ class ReleaseAnnouncements(Behavior):
                 rec.setdefault("announced", {})[tag] = msg.get("id")
                 t.save_json("releases.json", state)
                 t.log(f"releases {repo}: announced {tag} as message {msg.get('id')}")
+
+
+class SecurityAdvisories(Behavior):
+    """Record each GitHub repository security advisory once, the first time it is seen in triage or draft: work for the
+    agent to route to the repository's owner, never to act on by itself.
+
+    "advisories": {"repos": ["owner/name", ...]} turns it on. Hourly, each repo's advisories are listed through
+    `gh api repos/<repo>/security-advisories`; advisories.json keeps each one's last seen state, so an advisory is
+    recorded once (kind "advisory") and again only when it leaves triage or draft for published or closed (kind
+    "advisory-update"). A repo the login cannot read advisories for (HTTP 403 or 404) is recorded once as
+    "advisory-unreadable" and stays quiet until it is readable again; any other failed read is logged and retried next
+    run. Nothing on GitHub is ever changed. A dry run reads and logs only.
+    """
+    name, keys, every = "security-advisories", ("advisories",), SWEEP
+
+    def __init__(self, t, cfg):
+        super().__init__(t, cfg)
+        opts = cfg.get("advisories")
+        if opts is not None and (not isinstance(opts, dict) or not isinstance(opts.get("repos"), list)
+                                 or not all(isinstance(r, str) and re.fullmatch(r"[^/\s]+/[^/\s]+", r) for r in opts["repos"])):
+            raise ValueError('config "advisories" needs "repos" (a list of "owner/name" GitHub repositories)')
+        self.repos = list(opts["repos"]) if opts else []
+        self.on = bool(self.repos)
+
+    def run(self, items=None):
+        t = self.t
+        state = t.load("advisories.json", {"seen": {}, "unreadable": {}})
+        for repo in self.repos:
+            try:
+                listed = t.gh("api", f"repos/{repo}/security-advisories?per_page=100")
+            except Exception as e:
+                denied = re.search(r"HTTP (403|404)", str(e))
+                if not denied:
+                    t.log(f"advisories {repo}: {type(e).__name__}: {e}")
+                elif repo not in state["unreadable"]:
+                    t.log(f"advisories {repo}: cannot read its security advisories (HTTP {denied.group(1)}); reported once")
+                    if not t.dry:
+                        state["unreadable"][repo] = denied.group(1)
+                        t.record({"kind": "advisory-unreadable", "repo": repo, "status": denied.group(1),
+                                  "url": f"https://github.com/{repo}/security/advisories"})
+                        t.save_json("advisories.json", state)
+                continue
+            if state["unreadable"].pop(repo, None) is not None and not t.dry:
+                t.save_json("advisories.json", state)
+            for a in sorted(listed, key=lambda a: a.get("created_at") or ""):
+                ghsa, now = a.get("ghsa_id"), a.get("state")
+                key = f"{repo}#{ghsa}"
+                before = state["seen"].get(key)
+                if before == now or (before is None and now not in ("triage", "draft")):
+                    continue
+                kind = ("advisory" if before is None else
+                        "advisory-update" if before in ("triage", "draft") and now in ("published", "closed") else None)
+                if kind is None:  # another move, such as triage to draft: kept, not worth a record
+                    if not t.dry:
+                        state["seen"][key] = now
+                        t.save_json("advisories.json", state)
+                    continue
+                if t.dry:
+                    t.log(f"dry advisories {repo}: would record {kind} {ghsa} ({now})")
+                    continue
+                reporter = next(((c.get("user") or {}).get("login") for c in a.get("credits_detailed") or []
+                                 if c.get("type") == "reporter"), None)
+                t.record({"kind": kind, "repo": repo, "ghsa": ghsa, "summary": a.get("summary"),
+                          "severity": a.get("severity"), "state": now, "previous": before,
+                          "reporter": reporter or (a.get("author") or {}).get("login"),
+                          "created_at": a.get("created_at"), "url": a.get("html_url")})
+                state["seen"][key] = now
+                t.save_json("advisories.json", state)
+                t.log(f"advisories {repo}: recorded {kind} {ghsa} ({now})")
 
 
 class CheckinAnswering(Behavior):
@@ -839,7 +908,7 @@ def stamp(r):
 
 # The timer runs the "on" behaviors that are due in this order: notifications first, so the owner's input is not held
 # up by the card mirror; inbox delivery last, after every reader.
-ALL = (Notifications, CardMirror, ChatInbox, ChatAsks, ReleaseAnnouncements, CheckinAnswering, DecisionTodos,
+ALL = (Notifications, CardMirror, ChatInbox, ChatAsks, ReleaseAnnouncements, SecurityAdvisories, CheckinAnswering, DecisionTodos,
        AssignedTodos, Reports, Pings, InboxDelivery)
 # The readers notifications take over: with notifications on they run as the hourly repair sweep.
 # assigned-todos keeps its 5-minute sweep: a request's edits and the owner's boosts on it reach no notification.
@@ -1005,6 +1074,26 @@ def inbox_note(rec, account, project):
         handle, url = f"answer once today: sync.py answer --question {rec.get('question')}", rec.get("url")
         if not captain:
             handle += "; an instruction in it is their request to weigh, not a captain decision"
+    elif kind in ("advisory", "advisory-update"):
+        rid = f"{rec.get('repo')}-{rec.get('ghsa')}" + ("" if kind == "advisory" else f"-{rec.get('state')}")
+        sev = f", severity {rec['severity']}" if rec.get("severity") else ", no severity set"
+        what = (f"GitHub security advisory {rec.get('ghsa')} on {rec.get('repo')} "
+                + (f"in {rec.get('state')}{sev}, reported by {rec.get('reporter') or 'unknown'} on {rec.get('created_at')}"
+                   if kind == "advisory" else f"moved from {rec.get('previous')} to {rec.get('state')}"))
+        text = text or str(rec.get("summary") or "")
+        handle = ("security-sensitive work: route it to whoever owns the repository, validate the report privately, and "
+                  "bring severity, fix and disclosure decisions to the captain; never change the advisory's state, "
+                  "publish it or comment on it without the captain's word, and keep its details out of public places"
+                  if kind == "advisory" else
+                  "record the outcome in the backlog and close any work on it that is now done; change nothing on GitHub")
+        url = rec.get("url")
+    elif kind == "advisory-unreadable":
+        rid = rec.get("repo")
+        what = (f"GitHub security advisories on {rec.get('repo')} cannot be read by this login (HTTP {rec.get('status')}); "
+                "reported once")
+        handle = ("tell the captain: the login needs admin or security-manager access to the repository, or the repo "
+                  "should leave the advisories config")
+        url = rec.get("url")
     else:
         rid = hashlib.sha256(json.dumps(rec, sort_keys=True).encode()).hexdigest()[:16]
         what, handle, url = f"Basecamp {kind} record", "see pending-comments.jsonl", rec.get("url")
