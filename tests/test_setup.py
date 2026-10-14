@@ -201,6 +201,13 @@ class SetupTest(Base):
         self.assertEqual(made[0][:4], ["tools", "create", "engine", "--type"])
         self.assertEqual(sorted(a[3] for a in made[1:]), ["Figuring it out", "In progress", "Ready for QA"])
 
+    def test_card_mirror_without_owner_assignment(self):
+        with open(os.path.join(self.home, "data", "projects.md"), "w") as f:
+            f.write("- engine [direct-PR] - the engine\n")
+        self.assertEqual(self.setup(project=PROJECT, cards=True, assign=False, checkins=False), 0)
+        self.assertIs(json.load(open(self.config))["assign_captain"], False)
+        self.assertIn("card assignment for decisions", self.text().split("Off:")[1])
+
     def test_card_mirror_without_repos_stays_off(self):
         self.assertEqual(self.setup(project=PROJECT, cards=True, checkins=False), 0)
         self.assertNotIn("tables", json.load(open(self.config)))

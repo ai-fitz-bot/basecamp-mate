@@ -213,6 +213,66 @@ class Assignment(Base):
         self.assertEqual(assign[0][:3], ["cards", "update", "501"])
 
 
+class NoCaptainAssignment(Base):
+    def config(self, **opts):
+        path = os.path.join(self.cfgdir, "config.json")
+        cfg = json.load(open(path))
+        cfg.update(opts)
+        json.dump(cfg, open(path, "w"))
+
+    def assignments(self):
+        return [c for c in self.stub.calls if "--assignee" in c or c[:1] == ["unassign"]]
+
+    def test_create_keeps_the_column_without_assigning(self):
+        self.config(assign_captain=False)
+        self.sync().main([item("a", hold="pick", hold_kind="captain")])
+        create = self.stub.calls[0]
+        self.assertEqual(create[:2], ["cards", "create"])
+        self.assertNotIn("--assignee", create)
+        rec = self.cards()["a|server"]
+        self.assertEqual(rec["column"], "Figuring it out")
+        self.assertFalse(rec["assigned"])
+
+    def test_update_to_a_hold_does_not_assign(self):
+        self.config(assign_captain=False)
+        self.sync().main([item("a")])
+        self.stub.calls.clear()
+        self.sync().main([item("a", hold="pick", hold_kind="captain")])
+        self.assertEqual(self.assignments(), [])
+        self.assertEqual(self.cards()["a|server"]["column"], "Figuring it out")
+
+    def test_switching_off_unassigns_only_the_owner_from_held_cards(self):
+        self.sync().main([item("a", hold="pick", hold_kind="captain")])
+        self.assertTrue(self.cards()["a|server"]["assigned"])
+        self.config(assign_captain=False)
+        self.stub.calls.clear()
+        self.sync().main([item("a", hold="pick", hold_kind="captain")])
+        # one unassign naming only the owner, so any other assignee stays on the card
+        self.assertEqual(self.assignments(), [["unassign", "501", "--card", "--from", str(CAPTAIN)]])
+        rec = self.cards()["a|server"]
+        self.assertFalse(rec["assigned"])
+        self.assertEqual(rec["column"], "Figuring it out")
+        self.stub.calls.clear()
+        self.sync().main([item("a", hold="pick", hold_kind="captain")])
+        self.assertEqual(self.assignments(), [])
+
+    def test_dry_run_plans_the_unassign(self):
+        self.sync().main([item("a", hold="pick", hold_kind="captain")])
+        self.config(assign_captain=False)
+        plan = self.sync(dry=True).main([item("a", hold="pick", hold_kind="captain")])
+        self.assertEqual(plan["unassign"], 1)
+
+    def test_default_still_assigns(self):
+        self.config(assign_captain=True)
+        self.sync().main([item("a", hold="pick", hold_kind="captain")])
+        self.assertTrue(self.cards()["a|server"]["assigned"])
+
+    def test_rejects_a_non_boolean(self):
+        self.config(assign_captain="no")
+        with self.assertRaises(ValueError):
+            self.sync()
+
+
 class IdMap(Base):
     def test_create_then_rerun_is_noop(self):
         self.sync().main([item("a"), item("b", repo="eng")])

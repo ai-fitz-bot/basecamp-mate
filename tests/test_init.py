@@ -341,6 +341,10 @@ class InitTest(unittest.TestCase):
         self.assertEqual(cfg, EXPECTED | {"pings": {}})
         self.assertNotIn("pings", self.init().discover()[0])
 
+    def test_no_assign_captain_writes_the_switch(self):
+        self.assertEqual(self.init(assign_captain=False).discover()[0], EXPECTED | {"assign_captain": False})
+        self.assertNotIn("assign_captain", self.init().discover()[0])
+
     def test_assigned_todos_flag_turns_the_behavior_on(self):
         cfg, _ = self.init(assigned_todos=True).discover()
         self.assertEqual(cfg, EXPECTED | {"assigned_todos": {}})

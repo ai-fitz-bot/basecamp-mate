@@ -221,7 +221,7 @@ class System:
 class Init:
     def __init__(self, url, login, home, captain=None, listen_to=(), operators=(), participants_project=False,
                  participants_domains=(), repo_map=(), create_missing=False, dry=False,
-                 force=False, cards=True, todos=False, reports=False, every_line=False, checkins=None, releases=True, inbox=False,
+                 force=False, cards=True, assign_captain=True, todos=False, reports=False, every_line=False, checkins=None, releases=True, inbox=False,
                  pings=False, assigned_todos=False, assigned_anywhere=False, advisories=(), chats=True, no_keyring=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
         self.account, self.project = parse_url(url)
         self.login, self.home = login, os.path.abspath(home)
@@ -238,6 +238,7 @@ class Init:
                 raise Refuse(f"--repo-map takes <table name>=<repo>, got {pair!r}")
             self.repo_map[name.strip().lower()] = repo.strip()
         self.create_missing, self.dry, self.force, self.cards = create_missing, dry, force, cards
+        self.assign_captain = assign_captain
         if not cards and (self.repo_map or create_missing):
             raise Refuse("--no-cards cannot be combined with --repo-map or --create-missing-columns")
         self.todos, self.reports, self.every_line, self.checkins = todos, reports, every_line, checkins
@@ -360,6 +361,8 @@ class Init:
                          "--participants-project or --listen-to instead")
         if self.cards:
             cfg.update(repos=dict(sorted(repos.items())), tables=cfg_tables)
+            if not self.assign_captain:
+                cfg["assign_captain"] = False
         chats = [d["id"] for d in dock if d.get("name") == "chat"] if self.chats else []
         if chats:
             cfg["chats"] = [{"chat": c, "every_line": True} for c in chats] if self.every_line else chats
@@ -593,6 +596,9 @@ def cli(argv, **kw):
                     help="create a missing Figuring it out, In progress or Ready for QA column")
     ap.add_argument("--no-cards", action="store_true",
                     help="set up without the card-table mirror: no card tables are read or written")
+    ap.add_argument("--no-assign-captain", action="store_true",
+                    help="never assign the owner to a card held for them (and unassign them from cards the mirror "
+                         "assigned); the agent sends each decision to its main home as a to-do instead")
     ap.add_argument("--todos", action="store_true",
                     help="decision to-dos: create the owner's decisions on the dock's to-do set and relay the owner's comments")
     ap.add_argument("--reports", action="store_true", help="let the agent post reports on the dock's message board")
@@ -627,7 +633,7 @@ def cli(argv, **kw):
         Init(a.url, a.login, a.home, captain=a.captain, listen_to=a.listen_to, operators=a.operator,
              participants_project=a.participants_project, participants_domains=a.participants_domain, repo_map=a.repo_map,
              create_missing=a.create_missing_columns, dry=a.dry_run, force=a.force,
-             cards=not a.no_cards, todos=a.todos, reports=a.reports, every_line=a.every_line,
+             cards=not a.no_cards, assign_captain=not a.no_assign_captain, todos=a.todos, reports=a.reports, every_line=a.every_line,
              checkins=a.checkins, releases=not a.no_releases, inbox=a.inbox, pings=a.pings,
              assigned_todos=a.assigned_todos, assigned_anywhere=a.assigned_todos_anywhere, advisories=a.advisories, chats=not a.no_chats, no_keyring=a.no_keyring, **kw).main()
     except Refuse as e:
