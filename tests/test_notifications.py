@@ -325,6 +325,76 @@ class Threads(NotifBase):
         self.assertEqual(self.stub.marked, [["10"]])
 
 
+class Replays(NotifBase):
+    """Regression: on 2026-10-15 two @mention notifications from 2026-10-04 and -05 on a decision to-do completed on
+    the 5th came back with no cursor. The to-do reader no longer reads a completed to-do, so the thread reader adopted it
+    as a new thread from the older mention and replayed all three owner comments the to-do reader had relayed and the
+    agent had answered, as a thread-comment and two mentions."""
+
+    OLD = ("2026-10-04T02:29:55.081Z", "2026-10-05T02:05:46.376Z")
+
+    def answered_and_completed(self):
+        """The decision to-do: the owner's "merge", two @mentions, each relayed once and answered, then completed."""
+        tid = self.create(key="ta-speech-bystander-prose")
+        self.stub.comments[str(tid)] = [comment(9, content="<p>merge</p>")]
+        self.notify(note(10, thread=tid, anchor=9))
+        self.poll()
+        self.stub.comments[str(tid)] += [comment(11, content="<p>@Agent are these ready to merge now?</p>"),
+                                         comment(12, content="<p>@Agent these merged. Why isn't this closed?</p>")]
+        self.notify(note(10, thread=tid, anchor=9), note(20, "Mention", thread=tid, anchor=11, at="2099-01-01T00:00:02Z"),
+                    note(21, "Mention", thread=tid, anchor=12, at="2099-01-01T00:00:03Z"))
+        self.poll()
+        self.assertTrue(self.sync().reply(12, "Closing it now."))
+        self.assertTrue(self.sync().todo_complete("ta-speech-bystander-prose"))
+        self.assertEqual([(r["kind"], r["comment"]) for r in self.pending()],
+                         [("todo-comment", 9), ("todo-comment", 11), ("todo-comment", 12)])
+        return tid
+
+    def forget(self, *ids):
+        """The notifications' cursors lose items `ids`, as when they drop out of one read of /my/readings.json."""
+        state = self.state()
+        for i in ids:
+            state["items"].pop(str(i))
+        with open(os.path.join(self.cfgdir, "notifications.json"), "w") as f:
+            json.dump(state, f)
+
+    def test_old_mentions_back_without_a_cursor_are_seeded_not_replayed(self):
+        tid = self.answered_and_completed()
+        self.forget(20, 21)
+        self.stub.calls.clear()
+        self.notify(note(20, "Mention", thread=tid, anchor=11, at=self.OLD[0]),
+                    note(21, "Mention", thread=tid, anchor=12, at=self.OLD[1]))
+        self.poll()
+        self.assertEqual(len(self.pending()), 3)
+        self.assertNotIn(["comments", "list", str(tid)], [c[:3] for c in self.stub.calls])
+        self.assertEqual(self.state("threads.json"), {})
+        self.assertEqual((self.state()["items"]["20"], self.state()["items"]["21"]), self.OLD)
+        self.assertIn("notifications: 2 notification(s) from before the last read seeded, not replayed: 20, 21", self.log())
+
+    def test_a_completed_todo_adopted_as_a_thread_starts_after_what_the_todo_reader_read(self):
+        tid = self.answered_and_completed()
+        self.forget(20, 21)
+        self.notify(note(20, "Mention", thread=tid, anchor=11, at="2099-01-01T00:00:02Z"),
+                    note(21, "Mention", thread=tid, anchor=12, at="2099-01-01T00:00:03Z"))
+        self.poll()  # the thread reader takes the completed to-do over: nothing the to-do reader read is new
+        self.assertEqual(len(self.pending()), 3)
+        self.assertNotIn("comments", self.state("threads.json")[f"{PROJECT}:{tid}"])
+        self.stub.comments[str(tid)].append(comment(900, content="<p>thanks, and one more thing</p>"))
+        self.notify(note(22, thread=tid, anchor=900, at="2099-01-01T00:00:04Z"))
+        self.poll()  # a comment after the to-do was done is still relayed, once
+        self.poll()
+        self.assertEqual([(r["kind"], r["comment"]) for r in self.pending()[3:]], [("thread-comment", 900)])
+
+    def test_a_thread_adopted_without_a_comment_to_start_from_starts_when_the_notification_did(self):
+        def doc(id, at):
+            return {"id": id, "creator": {"id": CAPTAIN, "name": "Cap"}, "content": f"<p>note {id}</p>", "created_at": at,
+                    "app_url": f"https://x/docs/4#c{id}", "parent": {"id": 4, "type": "Document", "title": "Roadmap"}}
+        self.stub.comments["4"] = [doc(7, "2099-01-01T00:00:00Z"), doc(8, "2099-01-01T00:10:00Z")]
+        self.notify(note(10, thread=4, path="documents", at="2099-01-01T00:10:00.100Z"))  # names the document, no comment
+        self.poll()
+        self.assertEqual([r["comment"] for r in self.pending()], [8])
+
+
 class Boosts(NotifBase):
     def test_an_owner_boost_on_the_agents_chat_line_runs_the_chat_reader_once(self):
         self.stub.lines["77"][0]["boosts_count"] = 1
@@ -385,7 +455,7 @@ class MarkRead(NotifBase):
         self.stub.fail.add(f"comments list {tid}")
         self.poll()
         self.assertEqual((self.pending(), self.stub.marked), ([], []))
-        self.assertNotIn("10", self.state()["items"])
+        self.assertEqual(self.state()["items"]["10"], "")  # known, not advanced: retried however old it gets
         self.assertIn("notifications: retrying next run: todos", self.log())
         self.stub.fail.clear()
         self.poll()

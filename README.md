@@ -244,7 +244,7 @@ own:
 | a comment or @mention on a mirrored card | that card's comment and 👍 readers, also for a card whose task has left the backlog (the mirror itself leaves such a card as it is) |
 | a comment or @mention on an open tracked to-do (a decision to-do or a request) | that to-do's comment reader |
 | a comment on one of the agent's own messages (with `reports` on) | that message's reader, whatever its age |
-| a comment or @mention on any other thread in the project (a document, an upload, someone else's to-do or message, a card nothing mirrors) | the thread reader: `thread-comment` or `mention` records |
+| a comment or @mention on any other thread in the project (a document, an upload, someone else's to-do or message, a card nothing mirrors, a tracked to-do once completed or closed) | the thread reader: `thread-comment` or `mention` records. A thread's first read starts at the notification's first unread comment (or, when it names none, at when it became unread), and never before the newest comment a to-do, card or message reader already read there; a comment one of them recorded or answered is never recorded again |
 | an @mention of the agent in a chat nothing relays | a `chat-question` for that line |
 | `Assignment` or `Completion` of a to-do (with `assigned_todos` on; in any project with `"scope": "account"`) | the to-do request reader, or the request's edit and closing check; the notification says who assigned or completed it |
 | a check-in `Reminder` (with `checkins` on) | the check-in reader: a faster signal than the 5-minute schedule check |
@@ -286,7 +286,9 @@ marked read here, except a Ping (with `pings` on) and a to-do request with `"sco
 "account"`. Basecamp's own items (`BoostReport`, `Bulletin`, `Onboarding`) are ignored.
 
 The first run only seeds the cursors and the boosts seen, so no history is replayed; the
-repair sweep reads the configured surfaces the same run. A dry run reads and logs, and
+repair sweep reads the configured surfaces the same run. Later, an item with no cursor that
+became unread more than 5 minutes before the previous read (it dropped out of a read and
+came back) is seeded the same way, since its thread was read then. A dry run reads and logs, and
 records, boosts, saves and marks nothing.
 
 **The repair sweep.** Notifications cannot see edits, card or to-do moves, or a thread the
@@ -836,7 +838,7 @@ claim, in `~/.local/state/basecamp-mate/runs/`; see "One home per project and lo
 | `checkins.json` | the script | check-in question id -> dates recorded as due (`recorded`) and dates answered (`answered`) |
 | `inbox.json` | the script | the line cursor of `pending-comments.jsonl` delivered to the inbox, and request ids whose failure was logged |
 | `messages.json` | the script | per agent message: comment cursor, owner comments recorded, acknowledgement boosts queued and done, comments replied to; boost counts and boosts seen on the messages and their comments |
-| `notifications.json` | the script | per notification id, its cursor (`unread_at` when last handled); the boost ids seen in `/my/boosts.json`; ids whose mark-read failed, to retry |
+| `notifications.json` | the script | per notification id, its cursor (`unread_at` when last handled, empty while its first handling keeps failing); when it last read `/my/readings.json`; the boost ids seen in `/my/boosts.json`; ids whose mark-read failed, to retry |
 | `timer.json` | the script | when each behavior's timer step last ran (`ran`), for its cadence; while refused as a duplicate run, the homes it overlaps and when that was last logged (`duplicate`) |
 | `threads.json` | the script | per followed thread (`<bucket>:<recording>`): its type and title, comment cursor, owner comments recorded, acknowledgement boosts queued and done, boost counts and boosts seen, comments replied to |
 | `pings.json` | the script | `since` (the Ping reader's first run) and, per Ping chat id, its bucket, title, URL, line cursor, owner lines recorded, acknowledgement boosts queued and done, boost counts and boosts seen, lines replied to |
