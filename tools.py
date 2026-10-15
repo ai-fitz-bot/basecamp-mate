@@ -1212,15 +1212,19 @@ class Tools:
         self.save_json("chats.json", state)
         return True
 
-    def read_thread(self, bucket, thread, since, mentions=(), ptype=None, title=None):
+    def read_thread(self, bucket, thread, since, mentions=(), ptype=None, title=None, after=None):
         """Record the listened-to people's new comments on recording `thread` (in `bucket`), a thread no other reader
         tracks but the acting user is subscribed to or @mentioned in: a card whatever its backlog state, a document, an
         upload, someone else's message or to-do, a check-in answer.
 
         threads.json keeps, per "<bucket>:<thread>", a cursor (the newest comment id seen),
         the comments recorded, acknowledgements and replies. A thread's first read starts at
-        comment `since` (the notification's first unread comment), so what was already
-        read before it is not replayed. Each new comment by someone listened to is a
+        comment `since` (the notification's first unread comment) or, without one, at ISO
+        time `after` (when the notification became unread), and never before the newest
+        comment another reader already read there (a decision to-do or to-do request, done
+        or not, a mirrored card, the agent's own message), so what was already read is not
+        replayed; a comment such a reader recorded or answered is never recorded here
+        again. Each new comment by someone listened to is a
         `mention` record when it is in `mentions` (a notification said so) or @mentions the
         acting user, else a `thread-comment`, and is queued for a 👀 when it is a mention or
         contains "?", a 👍 otherwise. `reply` answers either with a comment on the thread.
@@ -1237,7 +1241,11 @@ class Tools:
             return
         key = f"{bucket}:{thread}"
         state = self.load("threads.json", {})
-        rec = json.loads(json.dumps(state.get(key) or {"bucket": int(bucket), "thread": thread, "cursor": (since or 1) - 1,
+        floor, known = self.tracked_comments(bucket, thread)
+        new = key not in state
+        since = since if since != thread else None  # a notification on the recording itself names no comment
+        rec = json.loads(json.dumps(state.get(key) or {"bucket": int(bucket), "thread": thread,
+                                                       "cursor": max((since or 1) - 1, floor),
                                                        "parent_type": ptype, "title": title}))
         self.acting_id()
         cursor = rec["cursor"]
@@ -1246,7 +1254,9 @@ class Tools:
             if cid <= cursor:
                 continue
             cursor = cid
-            if not self.hears(c.get("creator")):
+            if new and since is None and after and history(c.get("created_at"), after):
+                continue  # there before the notification: the thread's history, not new input
+            if cid in known or not self.hears(c.get("creator")):
                 continue
             text = plain(c.get("content"))
             on = c.get("parent") or {}
@@ -1269,6 +1279,19 @@ class Tools:
             rec["cursor"] = cursor
             state[key] = rec
             self.save_json("threads.json", state)
+
+    def tracked_comments(self, bucket, thread):
+        """What the other readers already read on recording `thread` in `bucket`: (the newest comment id read, the ids
+        of the comments recorded, acknowledged or answered). A decision to-do or to-do request (open, done or closed),
+        a mirrored card and the agent's own message each keep their own cursor and lists."""
+        recs = [r for r in self.load("todos.json", {}).values()
+                if r.get("todo") == thread and str(r.get("bucket") or self.project) == str(bucket)]
+        if str(bucket) == str(self.project):
+            recs += [r for r in self.load("map.json", {}).values() if r.get("card") == thread]
+            recs += [p for p in [self.load("messages.json", {}).get("posts", {}).get(str(thread))] if p]
+        known = {x[0] if isinstance(x, list) else x
+                 for r in recs for f in ("comments", "replied", "ack", "acked") for x in r.get(f) or []}
+        return max([r.get("cursor") or 0 for r in recs] + [x for x in known if isinstance(x, int)] + [0]), known
 
     def record_unmonitored(self, kind, rtype, rid, who, at=None, rec=None, on=None, bucket=None, ref=None):
         """Record owner input no behavior handles as an `unmonitored` record, once per kind of thing.
@@ -1779,6 +1802,16 @@ def parse_reading(r):
 
 def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def history(at, since, slack=60):
+    """True when ISO time `at` is more than `slack` seconds before ISO time `since`: it was there before, not new
+    since. An unreadable time is never history, so nothing is dropped."""
+    try:
+        a, s = (datetime.fromisoformat(str(x).replace("Z", "+00:00")) for x in (at, since))
+        return (s - a).total_seconds() > slack
+    except (TypeError, ValueError):
+        return False
 
 
 def later(at, since):

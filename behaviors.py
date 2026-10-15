@@ -16,7 +16,7 @@ write goes through a Tools method.
 import hashlib, html, json, os, re
 from datetime import datetime, timezone
 
-from tools import AUTHORITY, THREADS, parse_reading, recording_type
+from tools import AUTHORITY, THREADS, history, now_iso, parse_reading, recording_type
 
 COLUMNS = ("Triage", "Not now", "Figuring it out", "In progress", "Ready for QA", "Done")
 SLOW, SWEEP = 300, 3600  # seconds: the card mirror's, releases' and check-ins' cadence; the hourly repair sweep's
@@ -613,7 +613,9 @@ class Notifications(Behavior):
     100 and the sidebar honest. The cursor, never the read flag, decides what is new, so
     someone marking everything read loses nothing, and an item whose reader failed keeps
     its old cursor and is retried next run. The first run only seeds the cursors and the
-    boosts seen, so history is not replayed. A dry run reads, logs and saves nothing.
+    boosts seen, so history is not replayed; so is any later item with no cursor that was
+    unread more than five minutes before the previous read (it dropped out of a read and came
+    back), since its thread was read then. A dry run reads, logs and saves nothing.
     """
     name, keys = "notifications", ("notifications",)
     QUIET = ("BoostReport", "Bulletin", "Onboarding")  # Basecamp's own items: never owner input
@@ -643,6 +645,7 @@ class Notifications(Behavior):
                 t.save_json("notifications.json", dict(state, refused=True))
             return
         state.pop("refused", None)
+        prev, now = state.get("read_at"), now_iso()  # taken before the read, so nothing new can predate it
         try:
             data = t.readings()
         except RuntimeError as e:
@@ -656,11 +659,15 @@ class Notifications(Behavior):
         cursors, seen = state.get("items") or {}, set(state.get("boosts") or [])
         want = {"cards": set(), "chats": {}, "todos": set(), "requests": {}, "checkins": False, "answers": False,
                 "messages": set(), "pings": {}, "mentions": {}, "threads": {}}
-        work = []  # (ref, mine, [group], check): one per changed notification or new boost
+        work, old = [], set()  # work: (ref, mine, [group], check), one per changed notification or new boost
         for r in readings:
             rid = str(r.get("id"))
-            if not first and cursors.get(rid) != stamp(r):
-                work.append((rid, *self.classify(r, want, data)))
+            if first or cursors.get(rid) == stamp(r):
+                continue
+            if rid not in cursors and prev and history(stamp(r), prev, 300):
+                old.add(rid)  # unread before the last read yet not in it (it fell out of a read and came back): seed it
+                continue
+            work.append((rid, *self.classify(r, want, data)))
         for b in boosts or []:
             if b.get("id") not in seen and not first_boosts:
                 work.append((("boost", b.get("id")), *self.classify_boost(b, want, data)))
@@ -680,10 +687,11 @@ class Notifications(Behavior):
             t.log(f"notifications: retrying next run: {', '.join(sorted(map(str, failed)))}")
         if t.dry:
             return
-        handled = {ref for ref, _ in done}
-        state["items"] = {str(r.get("id")): stamp(r) if first or str(r.get("id")) in handled else cursors.get(str(r.get("id")))
+        handled = {ref for ref, _ in done} | old
+        # A new item whose reader failed keeps an empty cursor, so it is retried, never seeded as old.
+        state["items"] = {str(r.get("id")): stamp(r) if first or str(r.get("id")) in handled else cursors.get(str(r.get("id")), "")
                           for r in readings}
-        state["items"] = {k: v for k, v in state["items"].items() if v is not None}
+        state["read_at"] = now
         if boosts is not None:
             listed = {b.get("id") for b in boosts}
             took = listed if first_boosts else seen | {ref[1] for ref in handled if isinstance(ref, tuple)}
@@ -698,6 +706,8 @@ class Notifications(Behavior):
                 t.log(f"notifications: marking {len(mark)} read failed, retrying next run: {e}")
                 state["unmarked"] = mark
                 t.save_json("notifications.json", state)
+        if old:
+            t.log(f"notifications: {len(old)} notification(s) from before the last read seeded, not replayed: {', '.join(sorted(old))}")
         if first:
             t.log(f"notifications: started; {len(readings)} notification(s) and {len(boosts or [])} boost(s) seeded, none replayed")
         if done and self.others["inbox-delivery"].on:
@@ -729,9 +739,9 @@ class Notifications(Behavior):
             step(f"ping {chat}", lambda c=conv: t.read_pings(convs=[c]))
         for rid, (bucket, chat) in sorted(want["mentions"].items()):
             step(f"mention {rid}", lambda r=rid, bk=bucket, c=chat: t.read_mention(bk, c, r))
-        for thread, (bucket, since, mentions, ptype, title) in sorted(want["threads"].items()):
-            step(f"thread {thread}", lambda th=thread, bk=bucket, sn=since, m=mentions, pt=ptype, ti=title:
-                 t.read_thread(bk, th, sn, m, pt, ti))
+        for thread, (bucket, since, mentions, ptype, title, after) in sorted(want["threads"].items()):
+            step(f"thread {thread}", lambda th=thread, bk=bucket, sn=since, m=mentions, pt=ptype, ti=title, af=after:
+                 t.read_thread(bk, th, sn, m, pt, ti, af))
         return failed
 
     def read_requests(self, requests):
@@ -817,16 +827,18 @@ class Notifications(Behavior):
 
             def after():  # the agent's own message was read above; anyone else's is a thread like any other
                 if not self.agent_message(thread):
-                    t.read_thread(bucket, thread, anchor, {anchor} if mention else (), "Message", topic(r))
+                    t.read_thread(bucket, thread, anchor, {anchor} if mention else (), "Message", topic(r), stamp(r))
             return True, [f"message {thread}"], after
-        self.thread(want, bucket, thread, anchor, mention, THREADS.get(path), topic(r))
+        self.thread(want, bucket, thread, anchor, mention, THREADS.get(path), topic(r), stamp(r))
         return True, [f"thread {thread}"], None
 
-    def thread(self, want, bucket, thread, anchor, mention, ptype, title):
-        """Add thread `thread` to the threads to read: from its first unread comment `anchor`, `anchor` a mention or not."""
-        bk, since, mentions, pt, ti = want["threads"].get(thread, (bucket, anchor, set(), ptype, title))
+    def thread(self, want, bucket, thread, anchor, mention, ptype, title, after=None):
+        """Add thread `thread` to the threads to read: from its first unread comment `anchor`, `anchor` a mention or not,
+        or, without one, from ISO time `after` (when the notification became unread)."""
+        bk, since, mentions, pt, ti, af = want["threads"].get(thread, (bucket, anchor, set(), ptype, title, after))
         want["threads"][thread] = (bk, min(x for x in (since, anchor) if x) if since or anchor else None,
-                                   mentions | ({anchor} if mention else set()), pt, ti)
+                                   mentions | ({anchor} if mention else set()), pt, ti,
+                                   min(x for x in (af, after) if x) if af or after else None)
 
     def classify_boost(self, bst, want, data):
         """One new boost on the agent's own recording: (this home's?, the reader groups it needs, an unmonitored check)."""
