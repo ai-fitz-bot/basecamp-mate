@@ -115,6 +115,7 @@ Without `notifications` (no `profile`, or `"notifications": false`) those four r
 | `reports` | `message_board` | `--reports` | comment and boost readers on the agent's messages (hourly sweep) | `post-message`; `reply` to feedback |
 | `pings` | `pings` | `--pings` | Ping reader (hourly sweep) | `reply` to each line, in the Ping |
 | `inbox-delivery` | `inbox` | `--inbox` | deliver each new pending record as a firstmate inbox note | handle the note, then `fm-inbox.sh drain --ack` |
+| `session-alert` | `session_alert` | `--session-alert [MINUTES]` (with `--inbox`; setup asks) | tell the owner once in chat when no firstmate session holds the lock while inbox notes wait (each minute) | start the session again |
 
 The boundary: behaviors never run a CLI themselves (every Basecamp, GitHub, backlog or
 Lavish call goes through a tool), and tools never decide whether to run or what to do
@@ -450,8 +451,9 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   acknowledgements and marking handled notifications read; never another home's.
 - Cards are never deleted, trashed or archived. Cards whose task left the backlog are
   left as they are (the run logs how many).
-- The sync never posts to chat or as a comment. Its one automatic post is a release
-  announcement, and only on the Message Board (below). Otherwise the only thing that
+- The sync never posts as a comment, and never to chat except the opt-in session alert
+  (one line per outage, below). Its other automatic post is a release announcement, and
+  only on the Message Board (below). Otherwise the only thing that
   posts is the explicit `sync.py reply` command below, run by the relaying agent to
   answer a captain question where it was asked: a comment on the card, or a line in the chat.
   Two more explicit commands post, both opt-in: `sync.py ask` (a new chat line for the
@@ -572,6 +574,19 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   run; it never fails the sync. `pending-comments.jsonl` stays the record either way,
   and a home without `inbox` keeps the file-plus-wake-check flow unchanged. With
   `init --inbox` the wake check watches only FAILED lines, since each note is its own wake.
+- Session alert: inbox notes wake only a running firstmate session, so after a reboot
+  (or a crash) nothing handles them. With `session_alert` set (and `inbox` on), each minute
+  the run reads the inbox delivery's firstmate home, read-only: line 1 of
+  `<fm_home>/state/.lock` (the primary session's pid) and the pending notes in
+  `<fm_home>/state/inbox/`. The session is down when no live process holds the lock; a lock
+  written before this boot counts as down even when its pid now names another process.
+  Once it is down and the oldest pending note has waited `after_minutes` (default 15), the
+  run posts one line in the `chat`, @mentioning the owner: the session is down and N
+  messages have waited since when. `session-alert.json` records it, so later runs stay quiet;
+  a session holding the lock again clears it (logged), and the next outage alerts again. A
+  failed post is logged `FAILED session alert` and retried next run; a profile that is the
+  owner never posts. The alert does not restart the session: relaunching it after boot is
+  left to the operator for now.
 - Acknowledgement boost: when the run records a new captain comment or approval, the
   acting user boosts it once (the comment itself, or the card for an approval). A comment
   whose text contains `?` is recorded with `"kind": "question"` and gets 👀 ("looking into
@@ -691,7 +706,9 @@ discovered chat as `{"chat": <id>, "every_line": true}`) and `--checkins <IANA t
 config is the same as before they existed, so re-running `init` on an older home changes
 nothing. `--no-releases` leaves `releases` out. `--advisories <owner/name>` (repeatable)
 adds `"advisories": {"repos": [...]}`. `--inbox` adds `"inbox": {}` and installs
-the failures-only wake check. `--listen` is still accepted and does nothing (notifications
+the failures-only wake check. `--session-alert [MINUTES]` (with `--inbox`) adds
+`"session_alert": {"chat": <the dock's first chat>, "after_minutes": MINUTES}` (default 15),
+refusing when the dock has no chat. `--listen` is still accepted and does nothing (notifications
 replaced the event listener); a config that differs from the discovered one only in a
 `"listen"` key is rewritten without it, no `--force` needed. `--pings` adds
 `"pings": {}`: the owner's Pings to the `--login` are relayed (see Pings).
@@ -724,14 +741,15 @@ installer) and systemd user services; asks for the home; signs the login in with
 under `BASECAMP_NO_KEYRING=1`; lists the login's accounts and projects to pick from and the
 project's people to pick the captain from; asks the yes/no questions (chat inbox, decision
 to-dos, check-ins on; card mirror, releases, reports, Pings off by default) and the
-check-in time zone; enables or adds the dock tool each chosen behavior needs (to-do set,
+check-in time zone, and, when inbox notes are chosen, whether to turn on the session alert
+(default yes, 15 minutes, in the dock's chat); enables or adds the dock tool each chosen behavior needs (to-do set,
 questionnaire, chat, message board) and, for the card mirror, a card table per registered
 repo that has none; then runs `init` itself (with `--create-missing-columns` only for the card
 mirror, `--force` after asking when the home already has a config, and `--no-keyring`), runs
 `run.sh` once as a test sync, and prints what is on and how to change it.
 `--answers <file.json>` answers by key (`home`, `login`, `account`, `project` (id or URL),
 `captain` (person id), `timezone`, `replace`, `install_cli`, and booleans `chat`, `todos`,
-`checkins`, `cards`, `releases`, `reports`, `pings`, `inbox`) and `--yes` takes the
+`checkins`, `cards`, `releases`, `reports`, `pings`, `inbox`, `session_alert`) and `--yes` takes the
 defaults; without a terminal, anything that needs a person (a sign-in, an unanswered pick)
 refuses with what to do instead of asking.
 
@@ -797,6 +815,9 @@ or by hand from
   owner's boosts on the agent's messages there are relayed.
 - `inbox` (optional): `{}` or `{"fm_home": "<firstmate home>"}`: deliver each new pending
   record as a note in that home's inbox (default: the `--home`).
+- `session_alert` (optional, needs `inbox`): `{"chat": <chat id>, "after_minutes": 15}`: post
+  one line to the owner in that chat once no firstmate session holds that home's lock while
+  an inbox note has waited `after_minutes`.
 - `notifications` (optional): on whenever `profile` is set. `false` turns it off;
   `{"mark_read": false}` leaves handled notifications unread; `{"unmonitored": false}`
   turns off `unmonitored` records. See Notifications.
@@ -837,6 +858,7 @@ claim, in `~/.local/state/basecamp-mate/runs/`; see "One home per project and lo
 | `chats.json` | the script | chat id -> line cursor, captured question lines, acknowledgement boosts queued and done, questions replied to (a chat nothing relays holds only the mentions recorded there) |
 | `checkins.json` | the script | check-in question id -> dates recorded as due (`recorded`) and dates answered (`answered`) |
 | `inbox.json` | the script | the line cursor of `pending-comments.jsonl` delivered to the inbox, and request ids whose failure was logged |
+| `session-alert.json` | the script | the session alert posted for the current outage (when, its line id, how many notes waited); empty while a session holds the lock |
 | `messages.json` | the script | per agent message: comment cursor, owner comments recorded, acknowledgement boosts queued and done, comments replied to; boost counts and boosts seen on the messages and their comments |
 | `notifications.json` | the script | per notification id, its cursor (`unread_at` when last handled, empty while its first handling keeps failing); when it last read `/my/readings.json`; the boost ids seen in `/my/boosts.json`; ids whose mark-read failed, to retry |
 | `timer.json` | the script | when each behavior's timer step last ran (`ran`), for its cadence; while refused as a duplicate run, the homes it overlaps and when that was last logged (`duplicate`) |

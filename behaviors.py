@@ -566,6 +566,72 @@ class InboxDelivery(Behavior):
             t.save_json("inbox.json", state)
 
 
+class SessionAlert(Behavior):
+    """Tell the owner in chat when the home's firstmate session is down while inbox notes wait for it.
+
+    "session_alert": {"chat": <chat id>, "after_minutes": 15} (with "inbox" on) checks each
+    minute, read-only, the inbox delivery's firstmate home: whether a live process holds its
+    primary session lock (state/.lock; a lock from before this boot is stale) and how long
+    its oldest pending note has waited. Once no session holds the lock and a note has waited
+    "after_minutes", it posts one line in the chat, @mentioning the owner, and records it in
+    session-alert.json so the next runs stay quiet; a session holding the lock again clears it.
+    A failed post is logged and retried next run; it never fails the sync. A dry run logs only.
+    """
+    name, keys, every = "session-alert", ("session_alert",), 60
+
+    def __init__(self, t, cfg):
+        super().__init__(t, cfg)
+        sa = cfg.get("session_alert")
+        if sa is None or sa is False:
+            return
+        if not isinstance(sa, dict) or sa.get("chat") is None or set(sa) - {"chat", "after_minutes"}:
+            raise ValueError('config "session_alert" must be {"chat": <chat id>, "after_minutes": <minutes>}')
+        if cfg.get("inbox") in (None, False):
+            raise ValueError('config "session_alert" needs "inbox": it watches the inbox delivery\'s firstmate home')
+        after = sa.get("after_minutes", 15)
+        if not isinstance(after, (int, float)) or isinstance(after, bool) or after < 0:
+            raise ValueError('config "session_alert" "after_minutes" must be a number of minutes, 0 or more')
+        self.on, self.chat, self.after = True, str(sa["chat"]), after * 60
+        inbox = cfg.get("inbox")
+        self.fm_home = os.path.abspath((inbox if isinstance(inbox, dict) else {}).get("fm_home") or t.home)
+
+    def run(self, items=None):
+        t = self.t
+        state = t.load("session-alert.json", {})
+        holder = t.session_holder(self.fm_home)
+        if holder is not None:
+            if state.get("alerted"):
+                t.log(f"session alert cleared: pid {holder} holds the firstmate session lock again")
+                if not t.dry:
+                    t.save_json("session-alert.json", {})
+            return
+        if state.get("alerted"):
+            return
+        notes = t.waiting_notes(self.fm_home)
+        now = datetime.now(timezone.utc).timestamp()
+        if not notes or now - notes[0] < self.after:
+            return
+        since = datetime.fromtimestamp(notes[0], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        if t.dry:
+            t.log(f"dry session alert: post in chat {self.chat}, {len(notes)} note(s) waiting since {since}")
+            return
+        if t.refused("session alert", "owner"):
+            t.save_json("session-alert.json", {"alerted": now_iso(), "refused": True})
+            return
+        text = (f"This home's firstmate session is down: no session holds its lock at {html.escape(self.fm_home)}, "
+                f"and {len(notes)} Basecamp message{'s' if len(notes) != 1 else ''} "
+                f"{'have' if len(notes) != 1 else 'has'} been waiting for it since {since}. "
+                "Start the home's firstmate session again to handle them; I won't repeat this until it is back.")
+        try:
+            line = t.chat_line(self.chat, f"<div>{t.owner_mention()} {text}</div>")
+        except Exception as e:
+            t.log(f"FAILED session alert in chat {self.chat}, retrying next run: {type(e).__name__}: {e}")
+            return
+        t.save_json("session-alert.json", {"alerted": now_iso(), "line": line.get("id"), "notes": len(notes)})
+        t.log(f"session alert: posted line {line.get('id')} in chat {self.chat}: no session holds the lock, "
+              f"{len(notes)} note(s) waiting since {since}")
+
+
 class Notifications(Behavior):
     """Read the agent login's Basecamp notifications and boosts every run, and run the reader for each thread that changed.
 
@@ -925,9 +991,9 @@ def stamp(r):
 
 
 # The timer runs the "on" behaviors that are due in this order: notifications first, so the owner's input is not held
-# up by the card mirror; inbox delivery last, after every reader.
+# up by the card mirror; inbox delivery after every reader, then the session alert, which watches what it delivered.
 ALL = (Notifications, CardMirror, ChatInbox, ChatAsks, ReleaseAnnouncements, SecurityAdvisories, CheckinAnswering, DecisionTodos,
-       AssignedTodos, Reports, Pings, InboxDelivery)
+       AssignedTodos, Reports, Pings, InboxDelivery, SessionAlert)
 # The readers notifications take over: with notifications on they run as the hourly repair sweep.
 # assigned-todos keeps its 5-minute sweep: a request's edits and the owner's boosts on it reach no notification.
 SWEPT = ("chat-inbox", "decision-todos", "reports", "pings")

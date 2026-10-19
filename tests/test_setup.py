@@ -182,6 +182,14 @@ class SetupTest(Base):
         self.assertEqual(self.stub.writes(), [])
         self.assertEqual(list(self.system.units), [init_home.unit_name(self.home)])
 
+    def test_inbox_turns_on_the_session_alert_unless_declined(self):
+        self.assertEqual(self.setup(project=PROJECT, checkins=False, inbox=True), 0)
+        cfg = json.load(open(self.config))
+        self.assertEqual((cfg["inbox"], cfg["session_alert"]), ({}, {"chat": 700, "after_minutes": 15}))
+        self.assertIn("session-down alert", self.text().split("Off:")[0])
+        self.assertEqual(self.setup(project=PROJECT, checkins=False, inbox=True, session_alert=False, replace=True), 0)
+        self.assertNotIn("session_alert", json.load(open(self.config)))
+
     def test_interactive_picks(self):
         # project pick (2 projects, sorted by name: HQ, Other), captain (one other person), 8 questions, inbox, time zone
         inputs = ["1", "", "", "n", "", "", "", "", "", "", ""]

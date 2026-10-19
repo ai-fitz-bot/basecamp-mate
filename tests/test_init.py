@@ -336,6 +336,15 @@ class InitTest(unittest.TestCase):
         self.assertEqual(self.system.checks["basecamp-sync"], init_home.CHECK_INBOX)
         self.assertNotIn("pending-comments", init_home.CHECK_INBOX.split("Pending records")[1])
 
+    def test_session_alert_watches_the_inbox_and_posts_in_the_dock_chat(self):
+        cfg, _ = self.init(inbox=True, session_alert=15).discover()
+        self.assertEqual(cfg, EXPECTED | {"inbox": {}, "session_alert": {"chat": 700, "after_minutes": 15}})
+        with self.assertRaises(init_home.Refuse):
+            self.init(session_alert=15)  # needs --inbox
+        self.stub.project["dock"] = [d for d in self.stub.project["dock"] if d["name"] != "chat"]
+        with self.assertRaises(init_home.Refuse):
+            self.init(inbox=True, session_alert=15).discover()
+
     def test_pings_flag_turns_the_pings_behavior_on(self):
         cfg, _ = self.init(pings=True).discover()
         self.assertEqual(cfg, EXPECTED | {"pings": {}})

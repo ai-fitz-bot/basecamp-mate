@@ -10,7 +10,7 @@ false), the chat inbox ("chats"), chat asks ("ask_chat"), check-in answering
 ("checkins"), release announcements ("releases"), decision to-dos ("todos"),
 reports ("message_board"), Pings ("pings": the owner's direct messages to the agent's
 login), to-do requests ("assigned_todos": to-dos the owner assigns to the agent's login),
-inbox delivery ("inbox") and notifications (on with a "profile": every run reads the agent
+inbox delivery ("inbox"), the session alert ("session_alert") and notifications (on with a "profile": every run reads the agent
 login's notifications and boosts and runs the reader for each thread that changed, and
 records the owner's unmonitored input; `sync.py unmonitored` keeps their keys).
 prompts/base.md is the agent's side of each behavior.
@@ -29,10 +29,11 @@ Deterministic, no model calls. Safety bounds, enforced here:
     the account, but only this project's (and those Pings and requests) are acted on,
     and an owner's @mention of the agent anywhere in the project is relayed;
   - nothing is ever deleted, trashed or archived, except the acting user's own 👀
-    boost once a question is answered; the timer run posts nothing to chat or as a
-    comment, and its only writes besides the card mirror are 👀/👍 acknowledgement
-    boosts, marking the agent login's handled notifications read, and a Message Board
-    announcement per new GitHub release;
+    boost once a question is answered; the timer run posts no comment, and its only
+    writes besides the card mirror are 👀/👍 acknowledgement boosts, marking the agent
+    login's handled notifications read, a Message Board announcement per new GitHub
+    release, and, with "session_alert", one chat line to the owner while the firstmate
+    session is down and inbox notes wait (once per outage);
   - only the explicit commands post, run by the agent, and each refuses to when no
     profile is set or the profile signs in as the owner;
   - id maps (map.json, todos.json, ...) make re-runs update or skip instead of

@@ -27,7 +27,10 @@ has none or several of what it needs: --todos (decision to-dos on the one to-do 
 --reports (posting to the one message board), --every-line (relay every owner line
 in the chats) and --checkins <time zone> (the one Automatic Check-ins questionnaire).
 --no-releases leaves release announcements out. --inbox delivers each pending record
-as a firstmate inbox note, and the wake check then watches only failures. --pings
+as a firstmate inbox note, and the wake check then watches only failures;
+--session-alert [MINUTES] (with --inbox) adds the session alert: one line in the dock's
+chat, @mentioning the owner, once no firstmate session holds this home's lock while an
+inbox note has waited that long (default 15), so a reboot cannot strand messages unseen. --pings
 relays the owner's Pings (direct messages) to the --login, which live outside the
 project. --assigned-todos treats a to-do the owner assigns to the --login in the
 project as a request: relayed, acknowledged and tracked until done;
@@ -222,7 +225,7 @@ class Init:
     def __init__(self, url, login, home, captain=None, listen_to=(), operators=(), participants_project=False,
                  participants_domains=(), repo_map=(), create_missing=False, dry=False,
                  force=False, cards=True, assign_captain=True, todos=False, reports=False, every_line=False, checkins=None, releases=True, inbox=False,
-                 pings=False, assigned_todos=False, assigned_anywhere=False, advisories=(), chats=True, no_keyring=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
+                 session_alert=None, pings=False, assigned_todos=False, assigned_anywhere=False, advisories=(), chats=True, no_keyring=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
         self.account, self.project = parse_url(url)
         self.login, self.home = login, os.path.abspath(home)
         self.captain_arg, self.listen_to, self.operator_args = captain, list(listen_to), list(operators)
@@ -243,6 +246,9 @@ class Init:
             raise Refuse("--no-cards cannot be combined with --repo-map or --create-missing-columns")
         self.todos, self.reports, self.every_line, self.checkins = todos, reports, every_line, checkins
         self.releases, self.inbox, self.pings = releases, inbox, pings
+        self.session_alert = session_alert  # minutes before the alert, or None: off
+        if session_alert is not None and (not inbox or session_alert < 0):
+            raise Refuse("--session-alert needs --inbox (it watches the inbox's notes) and a number of minutes, 0 or more")
         self.assigned_todos, self.assigned_anywhere = assigned_todos or assigned_anywhere, assigned_anywhere
         self.chats = chats
         self.advisories = sorted(set(advisories))
@@ -386,6 +392,12 @@ class Init:
                 cfg[key] = {"questionnaires": ids, "timezone": self.checkins}
         if self.inbox:
             cfg["inbox"] = {}
+        if self.session_alert is not None:
+            alert_chats = [d["id"] for d in dock if d.get("name") == "chat"]
+            if not alert_chats:
+                problems.append("--session-alert needs an enabled chat in the project's dock, found none")
+            else:
+                cfg["session_alert"] = {"chat": alert_chats[0], "after_minutes": self.session_alert}
         if self.pings:
             cfg["pings"] = {}
         if self.assigned_todos:
@@ -607,6 +619,9 @@ def cli(argv, **kw):
                     help="record due Automatic Check-ins questions, scheduled in this IANA time zone")
     ap.add_argument("--inbox", action="store_true",
                     help="deliver each new pending record as a note in this home's firstmate inbox (the wake)")
+    ap.add_argument("--session-alert", nargs="?", const=15, type=int, metavar="MINUTES",
+                    help="with --inbox: tell the owner once in the dock's chat when no firstmate session holds this "
+                         "home's lock while an inbox note has waited MINUTES (default 15); clears when one does again")
     ap.add_argument("--listen", action="store_true", help=argparse.SUPPRESS)  # retired: notifications replaced it
     ap.add_argument("--pings", action="store_true",
                     help="relay the owner's Pings (direct messages) to the --login; the agent answers with sync.py reply")
@@ -634,7 +649,7 @@ def cli(argv, **kw):
              participants_project=a.participants_project, participants_domains=a.participants_domain, repo_map=a.repo_map,
              create_missing=a.create_missing_columns, dry=a.dry_run, force=a.force,
              cards=not a.no_cards, assign_captain=not a.no_assign_captain, todos=a.todos, reports=a.reports, every_line=a.every_line,
-             checkins=a.checkins, releases=not a.no_releases, inbox=a.inbox, pings=a.pings,
+             checkins=a.checkins, releases=not a.no_releases, inbox=a.inbox, session_alert=a.session_alert, pings=a.pings,
              assigned_todos=a.assigned_todos, assigned_anywhere=a.assigned_todos_anywhere, advisories=a.advisories, chats=not a.no_chats, no_keyring=a.no_keyring, **kw).main()
     except Refuse as e:
         print(e, file=sys.stderr)
