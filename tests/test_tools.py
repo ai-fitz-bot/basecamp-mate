@@ -160,7 +160,7 @@ class TodoSubtasks(ToolBase):
     QS = ["Merge the fix?", "Backport it to 1.x?"]
 
     def test_each_question_is_a_checklist_item_kept_in_the_record(self):
-        tid = self.create(subtasks=self.QS)
+        tid = self.create(title="The fix", subtasks=self.QS)
         [call] = self.stub.made("todos create")
         self.assertEqual(call[-1], "--description=Evidence: https://github.com/o/r/pull/1\n\n"
                                    "1. ☐ Merge the fix?\n2. ☐ Backport it to 1.x?")
@@ -198,6 +198,9 @@ class TodoSubtasks(ToolBase):
             self.sync().todo_subtask("ta-x", 1)
         with self.assertRaises(ValueError):
             self.create("ta-y", subtasks=["ok", " "])
+        with self.assertRaises(ValueError):  # every decision is a subtask, so never just one
+            self.create("ta-y", subtasks=["Merge the fix?"])
+        self.assertEqual(len(self.stub.made("todos create")), 1)
 
 class TodoComments(ToolBase):
     def setUp(self):

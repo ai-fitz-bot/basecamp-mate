@@ -113,8 +113,9 @@ With `todos` on, put each item waiting on the captain (a decision, approval, mer
 credential or login) to them as one to-do instead:
 `python3 $SYNC/sync.py todo create --home <home> --config <config> --key <stable key> --title "<plain question>" --body-file <file>`,
 with a Markdown description of the evidence, consequence, options, recommendation and the
-full URL of every PR. When it asks more than one question, give each its own repeatable
-`--subtask "<question>"` by default (a numbered checklist on the to-do, since Basecamp to-dos
+full URL of every PR. When it carries more than one decision, every one of them, the first
+included, is its own repeatable `--subtask "<question>"` by default, the title names the
+topic and the description holds only context, never a question outside the checklist (a numbered checklist on the to-do, since Basecamp to-dos
 have no sub-items), tick each as it is answered with
 `sync.py todo subtask --todo <key> --number <n>`, and the to-do completes once all are
 ticked. Their comment comes back as a `todo-comment` record, and their

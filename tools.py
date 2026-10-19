@@ -1619,6 +1619,8 @@ class Tools:
         subtasks = [{"text": q.strip(), "done": None} for q in subtasks]
         if any(not q["text"] for q in subtasks):
             raise ValueError("a subtask needs text")
+        if len(subtasks) == 1:
+            raise ValueError("one decision needs no subtask: pass every decision as a subtask, or none")
         with self.locked("todos.json"):
             have = self.load("todos.json", {}).get(key)
         if have is not None:

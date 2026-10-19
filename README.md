@@ -521,8 +521,9 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   (`"todos": {"todoset": <id>}`, or the project's only one with `"todos": {}`), or in a
   to-do list (`--list <id>`, or `"todos": {"list": <id>}`), with an optional `--due`. The
   body file is the description in Markdown, rendered by the CLI (bare URLs become links).
-  A decision with several questions passes each as its own repeatable `--subtask
-  "<question>"`: Basecamp to-dos have no sub-items, so they follow the description as a
+  A to-do with more than one decision passes every one, the first included, as its own
+  repeatable `--subtask "<question>"` (a lone subtask is refused), leaving the description
+  only context: Basecamp to-dos have no sub-items, so they follow the description as a
   numbered ☐ checklist, kept in `todos.json`; `sync.py todo subtask --todo <key or id>
   --number <n>` ticks one (☑, rewriting the description) and completes the to-do once the
   last is ticked.
