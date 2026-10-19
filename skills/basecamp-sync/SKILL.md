@@ -13,7 +13,8 @@ config turns on, each composed from tools: the card mirror (`tables`, `repos`; o
 check-in answering (`checkins`), release announcements (`releases`), decision to-dos
 (`todos`), reports (`message_board`), Pings (`pings`: the owner's direct messages to the
 agent's login, outside the project), to-do requests (`assigned_todos`: to-dos the owner
-assigns to the agent's login, in the project or, with `"scope": "account"`, anywhere in the account), inbox delivery (`inbox`) and notifications (on
+assigns to the agent's login, in the project or, with `"scope": "account"`, anywhere in the account), inbox delivery (`inbox`), the session alert (`session_alert`: one chat line
+to the owner while no firstmate session holds the home's lock and inbox notes wait, as after a reboot) and notifications (on
 with a `profile`: every run reads the agent login's Basecamp notifications and boosts and
 runs the reader for each thread that changed, so the captain's input arrives within about
 half a minute; it relays their comments and @mentions on anything the login follows, marks
@@ -37,7 +38,7 @@ A person setting a home up by hand runs `$SYNC/bin/basecamp-mate setup`: a guide
 setup (sign-in with a link and code, project picker, yes/no questions) that ends in the same
 `init`. To run it yourself without questions, pass `--answers <file.json>` (keys: `home`,
 `login`, `project` id or URL, `captain` person id, `timezone`, and `true`/`false` for `chat`,
-`todos`, `checkins`, `cards`, `releases`, `reports`, `pings`, `inbox`); it refuses
+`todos`, `checkins`, `cards`, `releases`, `reports`, `pings`, `inbox`, `session_alert`); it refuses
 instead of asking when the login is not signed in. `$SYNC/bin/basecamp-mate doctor` checks
 everything (CLI, sign-in, project, card columns, notifications, the timer, last sync, wake check) and prints
 each problem with its fix; it exits non-zero when something is broken.
@@ -56,6 +57,7 @@ board that is really a repo's. When the owner wants only chat, check-ins or rele
 announcements, or the project has no card tables, pass `--no-cards`. `--todos`,
 `--reports`, `--every-line`, `--pings`, `--assigned-todos`, `--inbox` and `--checkins <time zone>` turn on decision
 to-dos, reports, every-line chat, Ping relaying, to-do requests, inbox delivery and check-in answering; `--no-releases` leaves announcements out.
+`--session-alert [MINUTES]` (with `--inbox`) adds the session alert in the dock's chat.
 Notifications need no flag (`--listen` is accepted and does nothing).
 `--no-assign-captain` keeps the mirror from assigning the owner to held cards (`"assign_captain": false`).
 `--assigned-todos-anywhere` takes to-do requests from every project of the account

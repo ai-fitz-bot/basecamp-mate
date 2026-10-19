@@ -327,6 +327,53 @@ class Tools:
         except ValueError:
             return None
 
+    def session_holder(self, fm_home):
+        """The pid holding firstmate home `fm_home`'s primary session lock, or None when no live process holds it.
+
+        Read-only: line 1 of <fm_home>/state/.lock is the holder's pid. A lock written
+        before this boot is stale even when its pid now names some other process, which
+        is just what a reboot leaves behind.
+        """
+        p = os.path.join(fm_home, "state", ".lock")
+        try:
+            with open(p) as f:
+                pid = int((f.readline() or "").strip())
+            written = os.path.getmtime(p)
+        except (OSError, ValueError):
+            return None
+        boot = boot_time()
+        if pid <= 0 or (boot is not None and written < boot):
+            return None
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+        except PermissionError:
+            pass  # another user's process: alive enough
+        return pid
+
+    def waiting_notes(self, fm_home):
+        """When each note still pending in firstmate home `fm_home`'s inbox was queued (epoch seconds), oldest first.
+
+        Read-only: a pending note is state/inbox/<epoch>-<suffix>.note; handled ones are in handled/.
+        """
+        d = os.path.join(fm_home, "state", "inbox")
+        try:
+            names = os.listdir(d)
+        except OSError:
+            return []
+        out = []
+        for n in names:
+            m = re.match(r"(\d+)-[^/]*\.note$", n)
+            if m:
+                out.append(int(m.group(1)))
+        return sorted(out)
+
+    def chat_line(self, chat, content):
+        """Post HTML `content` as a new line in chat `chat`; returns the line. No refusal rules."""
+        return self.bc("api", "post", f"/buckets/{self.project}/chats/{chat}/lines.json",
+                       "-d", json.dumps({"content": content, "content_type": "text/html"})) or {}
+
     # --- readers: poll Basecamp, append pending records, acknowledge ---
 
     def read_boosts(self, rec, surface, context, counted=None, always=(), bucket=None):
@@ -1499,7 +1546,7 @@ class Tools:
     def ask(self, text):
         """Post `text` as a new line in the "ask_chat" chat, @mentioning the owner.
 
-        Run only by the relaying agent; the sync itself never posts to chat. Refused,
+        Run only by the relaying agent; the sync's only own chat post is the session alert. Refused,
         like `reply`, when no profile is set or it signs in as the owner.
         """
         if self.ask_chat is None:
@@ -1752,6 +1799,18 @@ def plain(content):
 def boost_items(recordings):
     """[(id, url, boosts_count, creator id)] of listed recordings (lines, comments, answers, messages), for read_boosts."""
     return [(r.get("id"), r.get("app_url"), r.get("boosts_count") or 0, (r.get("creator") or {}).get("id")) for r in recordings]
+
+
+def boot_time():
+    """When this computer booted (epoch seconds, from /proc/stat's btime), or None where unreadable."""
+    try:
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("btime "):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
 
 
 RECENT = 300  # seconds a boost the received-boosts read does not list yet is retried before it is dropped

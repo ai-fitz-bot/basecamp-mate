@@ -41,10 +41,11 @@ QUESTIONS = (
     ("pings", "Relay your Pings (direct messages) to the agent?", False),
 )
 ANSWERS = ("home", "login", "account", "project", "captain", "timezone", "replace", "install_cli",
-           "inbox", *(k for k, _, _ in QUESTIONS))
+           "inbox", "session_alert", *(k for k, _, _ in QUESTIONS))
 LABELS = {"chat": "chat inbox", "todos": "decision to-dos", "checkins": "check-in answers",
           "cards": "card mirror", "assign": "card assignment for decisions", "releases": "release announcements",
-          "reports": "Message Board reports", "pings": "Pings", "inbox": "firstmate inbox notes"}
+          "reports": "Message Board reports", "pings": "Pings", "inbox": "firstmate inbox notes",
+          "session_alert": "session-down alert"}
 # The dock tool each behavior needs, and whether there must be exactly one.
 TOOLS = {"chat": ("chat", "Chat", False), "todos": ("todoset", "To-dos", True),
          "checkins": ("questionnaire", "Automatic Check-ins", True),
@@ -369,6 +370,9 @@ class Setup:
         captain = self.pick_captain(project)
         chosen = self.choose_behaviors()
         chosen["inbox"] = self.ask.yes("inbox", "Deliver each new message as a firstmate inbox note?", False)
+        chosen["session_alert"] = chosen["inbox"] and self.ask.yes(
+            "session_alert", "Tell you in the project's chat when no firstmate session is running (after a reboot, say) "
+            "while messages wait for it?", True)
         timezone = None
         if chosen["checkins"]:
             timezone = self.ask.text("timezone", "Which time zone are your check-ins in? (like America/Chicago)",
@@ -376,6 +380,8 @@ class Setup:
         off = self.ensure_tools(project, dock, chosen)
         if chosen["cards"] and not self.ensure_card_tables(home, project, dock):
             off["cards"] = "there is no code repo with a card table yet"
+        if chosen["session_alert"] and not any(d.get("name") == "chat" for d in dock):
+            off["session_alert"] = "the project has no chat"
         for k in off:
             chosen[k] = False
         chosen["assign"] = chosen["assign"] and chosen["cards"]
@@ -390,6 +396,7 @@ class Setup:
                     create_missing=chosen["cards"], force=force, cards=chosen["cards"], assign_captain=chosen["assign"], todos=chosen["todos"],
                     reports=chosen["reports"], checkins=timezone if chosen["checkins"] else None,
                     releases=chosen["releases"], inbox=chosen["inbox"],
+                    session_alert=15 if chosen["session_alert"] else None,
                     pings=chosen["pings"], chats=chosen["chat"], no_keyring=True,
                     runner=lambda cmd, **kw: self.run(cmd, **{**kw, "env": bc_env()}),
                     system=self.system, sync_dir=self.sync_dir, out=printed.append)
