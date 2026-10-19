@@ -48,7 +48,8 @@ Usage: sync.py --home <home> --config <config.json> [--all] [--dry-run] [--inclu
        sync.py reply --home <home> --config <config.json> --recording <comment, chat line or Ping line id> --body-file <file> [--again] [--dry-run]
        sync.py ask --home <home> --config <config.json> --body-file <file> [--dry-run]
        sync.py answer --home <home> --config <config.json> --question <check-in question id> --body-file <file> [--dry-run]
-       sync.py todo create --home <home> --config <config.json> --key <key> --title <text> [--body-file <file>] [--list <id>] [--due YYYY-MM-DD] [--dry-run]
+       sync.py todo create --home <home> --config <config.json> --key <key> --title <text> [--body-file <file>] [--list <id>] [--due YYYY-MM-DD] [--subtask <question>]... [--dry-run]
+       sync.py todo subtask --home <home> --config <config.json> --todo <key or id> --number <n> [--dry-run]
        sync.py todo track --home <home> --config <config.json> --key <key> --todo <id> [--dry-run]
        sync.py todo comment --home <home> --config <config.json> --todo <key or id> --body-file <file> [--dry-run]
        sync.py todo complete --home <home> --config <config.json> --todo <key or id> [--dry-run]
@@ -212,9 +213,10 @@ def todo_cli(argv, runner):
              "track": "Track an existing to-do under a key; its comments so far are not relayed.",
              "comment": "Comment on a tracked to-do.",
              "complete": "Mark a tracked to-do complete.",
+             "subtask": "Tick one subtask of a tracked to-do as answered; the to-do completes once all are ticked.",
              "show": "Print a tracked to-do as Basecamp has it now: open or not, due date, repetition rule."}
     if sub not in descs:
-        print("usage: sync.py todo {create,track,comment,complete,show} --home <home> --config <config.json> ...", file=sys.stderr)
+        print("usage: sync.py todo {create,track,comment,complete,subtask,show} --home <home> --config <config.json> ...", file=sys.stderr)
         return 2
     ap = common(f"sync.py todo {sub}", descs[sub])
     if sub in ("create", "track"):
@@ -224,18 +226,23 @@ def todo_cli(argv, runner):
         ap.add_argument("--body-file", help="the description, Markdown")
         ap.add_argument("--list", help="a to-do list id (default: the config's, else loose on the to-do set)")
         ap.add_argument("--due", help="YYYY-MM-DD")
+        ap.add_argument("--subtask", action="append", default=[],
+                        help="one question of the decision, repeatable: each becomes its own checklist item")
     elif sub == "track":
         ap.add_argument("--todo", required=True, type=int, help="the to-do's id")
     else:
         ap.add_argument("--todo", required=True, help="the tracked to-do's key or id")
+    if sub == "subtask":
+        ap.add_argument("--number", required=True, type=int, help="the subtask's number, from 1")
     if sub == "comment":
         ap.add_argument("--body-file", required=True, help="the comment, Markdown")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv[1:])
-    calls = {"create": lambda s: s.todo_create(a.key, a.title, read(a.body_file) if a.body_file else "", a.list, a.due),
+    calls = {"create": lambda s: s.todo_create(a.key, a.title, read(a.body_file) if a.body_file else "", a.list, a.due, a.subtask),
              "track": lambda s: s.todo_track(a.key, a.todo),
              "comment": lambda s: s.todo_comment(a.todo, read(a.body_file)),
              "complete": lambda s: s.todo_complete(a.todo),
+             "subtask": lambda s: s.todo_subtask(a.todo, a.number),
              "show": lambda s: s.todo_show(a.todo)}
     return command(a, f"todo {sub}", calls[sub], runner)
 

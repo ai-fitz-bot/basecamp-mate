@@ -1598,8 +1598,12 @@ class Tools:
         if self.todos is None and not (requests and self.assigned_todos):
             raise RuntimeError('config has no "todos"' + (' or "assigned_todos"' if requests else ""))
 
-    def todo_create(self, key, title, description="", todolist=None, due=None):
+    def todo_create(self, key, title, description="", todolist=None, due=None, subtasks=()):
         """Create a to-do assigned to the owner and track it in todos.json under `key`.
+
+        `subtasks` are the decision's questions when it asks more than one: Basecamp
+        to-dos have no sub-items, so they become a numbered checklist under the
+        description, kept in the record, each ticked by `todo_subtask`.
 
         It goes loose on the configured to-do set ("todos": {"todoset": id}, or the
         project's only one), or into a list (`todolist`, else "todos": {"list": id}).
@@ -1612,6 +1616,9 @@ class Tools:
             raise ValueError("a to-do needs a key and a title")
         if title.startswith("-"):
             raise ValueError("a to-do title cannot start with '-'")
+        subtasks = [{"text": q.strip(), "done": None} for q in subtasks]
+        if any(not q["text"] for q in subtasks):
+            raise ValueError("a subtask needs text")
         with self.locked("todos.json"):
             have = self.load("todos.json", {}).get(key)
         if have is not None:
@@ -1626,8 +1633,9 @@ class Tools:
             self.log(f"dry todo create {key}: {' '.join(where)}, assigned to {self.captain}")
             return None
         args = ["todos", "create", title.strip(), *where, "--assignee", str(self.captain)]
-        if description.strip():
-            args.append(f"--description={description.strip()}")
+        body = with_subtasks(description, subtasks)
+        if body:
+            args.append(f"--description={body}")
         if due:
             args += ["--due", due]
         data = self.bc(*args) or {}
@@ -1636,6 +1644,8 @@ class Tools:
             state = self.load("todos.json", {})
             state[key] = {"todo": tid, "title": title.strip(), "url": data.get("app_url"), "cursor": 0,
                           "boost_counts": {}, "boost_seen": [], "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+            if subtasks:
+                state[key].update(body=description.strip(), subtasks=subtasks)
             self.save_json("todos.json", state)
         self.log(f"todo create {key}: todo {tid} {data.get('app_url') or ''}".rstrip())
         return tid
@@ -1712,6 +1722,36 @@ class Tools:
         self.log(f"todo complete {key}: completed todo {rec['todo']}")
         return True
 
+    def todo_subtask(self, ref, number):
+        """Tick subtask `number` (from 1) of a tracked to-do, answered: its checklist is rewritten in the to-do's
+        description, and the to-do is completed once every subtask is ticked."""
+        self.need_todos()
+        key, rec = self.tracked(ref)
+        subtasks = rec.get("subtasks") or []
+        if not 1 <= number <= len(subtasks):
+            raise ValueError(f"to-do {key} has no subtask {number} (it has {len(subtasks)})")
+        if subtasks[number - 1]["done"]:
+            self.log(f"todo subtask {key} {number}: already done {subtasks[number - 1]['done']}")
+            return False
+        if self.refused(f"todo subtask {key} {number}", "owner"):
+            return False
+        if self.dry:
+            self.log(f"dry todo subtask {key} {number}: tick it on todo {rec['todo']}")
+            return False
+        subtasks = [dict(q) for q in subtasks]
+        subtasks[number - 1]["done"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.bc("todos", "update", str(rec["todo"]), f"--description={with_subtasks(rec.get('body') or '', subtasks)}",
+                project=rec.get("bucket"))
+        with self.locked("todos.json"):
+            state = self.load("todos.json", {})
+            state[key]["subtasks"] = subtasks
+            self.save_json("todos.json", state)
+        left = sum(not q["done"] for q in subtasks)
+        self.log(f"todo subtask {key} {number}: done, {left} left on todo {rec['todo']}")
+        if not left:
+            self.todo_complete(key)
+        return True
+
     def todo_show(self, ref, out=print):
         """Print a tracked to-do as Basecamp has it now, as JSON: whether it is open, its name and description, and its
         due date and repetition rule. Basecamp alone owns a to-do's schedule, so a date read earlier may have moved."""
@@ -1722,7 +1762,8 @@ class Tools:
         out(json.dumps({"key": key, "todo": rec["todo"], "title": todo.get("content"), "text": plain(todo.get("description")),
                         "open": not todo.get("completed") and todo.get("status") in (None, "active"),
                         "assigned_to_you": me is not None and me in [p.get("id") for p in todo.get("assignees") or []],
-                        **todo_schedule(todo), "url": todo.get("app_url")}, indent=1))
+                        **todo_schedule(todo), "url": todo.get("app_url"),
+                        **({"subtasks": rec["subtasks"]} if rec.get("subtasks") else {})}, indent=1))
         return True
 
     def post_message(self, subject, body):
@@ -1775,6 +1816,15 @@ def request_fields(rec):
 def request_project(rec):
     """The project a to-do request is in, {"id", "name"}; a request tracked before projects were kept has no id (the configured one)."""
     return {"id": rec.get("bucket"), "name": rec.get("project_name")}
+
+
+def with_subtasks(description, subtasks):
+    """A to-do's description (Markdown) with its subtasks as a numbered checklist after it, ☑ for each one done."""
+    description = (description or "").strip()
+    if not subtasks:
+        return description
+    items = "\n".join(f"{n}. {'☑' if q['done'] else '☐'} {q['text']}" for n, q in enumerate(subtasks, 1))
+    return f"{description}\n\n{items}".strip()
 
 
 def todo_digest(todo):

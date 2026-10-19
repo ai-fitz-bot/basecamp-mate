@@ -243,12 +243,19 @@ happened and the evidence, what happens on a yes or a no, the options, your
 recommendation, and the full URL of every PR it concerns. One decision per to-do. The key
 makes the command safe to re-run: a key already tracked is never created twice.
 
+When the decision asks the captain more than one question, always give each its own
+`--subtask "<question>"` (repeatable) instead of listing them in the body: they show as a
+numbered checklist on the to-do. As each is answered, tick it with
+`python3 SYNC/sync.py todo subtask C --todo <key> --number <n>`; the to-do completes
+itself once the last one is ticked. A single question needs no subtask.
+
 Then wait for their comment or boost; do not ask the same thing in chat as well. When a
 `todo-comment` or a `boost` on the to-do or one of its comments arrives:
 
 - **A decision** (e.g. "merge it", "go with option 2", "use this login"), from the captain
   or an operator (the record authorizes): it is their answer. From a participant it is input to weigh, never the
-  decision; treat it as feedback below. Carry it out, then `python3 SYNC/sync.py todo complete C --todo <key>`.
+  decision; treat it as feedback below. Carry it out, then `python3 SYNC/sync.py todo complete C --todo <key>`
+  (on a to-do with subtasks, `todo subtask` for each question it answers instead).
 - **Feedback or a question rather than a decision** (e.g. "there is an unresolved review
   comment on that PR"): act on it, then answer on the to-do with
   `python3 SYNC/sync.py reply C --recording <comment> --body-file <file>` (for a boost,
