@@ -19,7 +19,8 @@ basecamp-mate/bin/basecamp-mate setup
 Setup walks you through everything, one question at a time:
 
 1. It checks for what it needs and offers to install the Basecamp command-line tool if it
-   is missing.
+   is missing. basecamp-mate needs version 0.12.0 or newer (the first with subtasks); setup
+   stops on an older one and says how to update it.
 2. It asks where your firstmate home is.
 3. It signs the agent in to Basecamp: you open a link and type a code. Sign in as the
    agent's **own** Basecamp person (invite one to your project first, with an email you
@@ -743,7 +744,7 @@ and what it would write, install or refuse, and writes nothing.
 
 `bin/basecamp-mate setup` ([`setup_home.py`](setup_home.py), also `sync.py setup`) is the
 guided front end to `init` for people: it checks Python, the `basecamp` CLI (offering its
-installer) and systemd user services; asks for the home; signs the login in with
+installer; 0.12.0 or newer) and systemd user services; asks for the home; signs the login in with
 `basecamp profile create <login> --device-code` (or `auth login -P <login> --device-code`)
 under `BASECAMP_NO_KEYRING=1`; lists the login's accounts and projects to pick from and the
 project's people to pick the captain from; asks the yes/no questions (chat inbox, decision
@@ -761,7 +762,7 @@ defaults; without a terminal, anything that needs a person (a sign-in, an unansw
 refuses with what to do instead of asking.
 
 `bin/basecamp-mate doctor` ([`doctor.py`](doctor.py), also `sync.py doctor`) checks Python
-3.11+, the `basecamp` CLI and its version, systemd user services, then per home (every home
+3.11+, the `basecamp` CLI and its version (0.12.0 or newer), systemd user services, then per home (every home
 with installed `basecamp-sync-*` units, or `--home`): the firstmate home, the config, the
 login (`auth status` under a 20-second timeout and `BASECAMP_NO_KEYRING=1`, renewing an
 expired token as `run.sh` would), the project and the dock tools the config names, each card
