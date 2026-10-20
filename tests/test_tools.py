@@ -161,12 +161,12 @@ class TodoCreate(ToolBase):
 class TodoSubtasks(ToolBase):
     QS = ["Merge the fix?", "Backport it to 1.x?"]
 
-    def test_every_decision_is_a_native_subtask_assigned_to_the_owner(self):
+    def test_every_decision_is_a_native_subtask_left_unassigned(self):
         tid = self.create(title="The fix", subtasks=self.QS)
         [call] = self.stub.made("todos create")
         self.assertEqual(call[-1], "--description=Evidence: https://github.com/o/r/pull/1")  # context only
         self.assertEqual(self.stub.made("subtasks create"),
-                         [["subtasks", "create", str(tid), q, "--assignees", str(CAPTAIN)] for q in self.QS])
+                         [["subtasks", "create", str(tid), q] for q in self.QS])
         rec = self.todos()["ta-x"]
         self.assertEqual(rec["subtasks"], [{"text": "Merge the fix?", "done": None, "id": tid + 1},
                                            {"text": "Backport it to 1.x?", "done": None, "id": tid + 2}])
