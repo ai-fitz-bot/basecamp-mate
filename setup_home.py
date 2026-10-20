@@ -27,6 +27,7 @@ from init_home import Init, Refuse
 HERE = os.path.dirname(os.path.abspath(__file__))
 NO_KEYRING = {"BASECAMP_NO_KEYRING": "1"}
 INSTALL_CLI = "curl -fsSL https://basecamp.com/install-cli | bash"
+MIN_BASECAMP = (0, 12, 0)  # the first CLI with `basecamp subtasks`, which decision to-dos use
 
 # The yes/no questions, in the order asked: (answer key, question, default).
 QUESTIONS = (
@@ -51,6 +52,16 @@ TOOLS = {"chat": ("chat", "Chat", False), "todos": ("todoset", "To-dos", True),
          "checkins": ("questionnaire", "Automatic Check-ins", True),
          "releases": ("message_board", "Message Board", True), "reports": ("message_board", "Message Board", True)}
 
+
+
+def cli_version(run, **kw):
+    """The installed basecamp CLI's version as a tuple, or None when it does not say one."""
+    try:
+        r = run(["basecamp", "--version"], capture_output=True, text=True, timeout=15, **kw)
+    except subprocess.TimeoutExpired:
+        return None
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", r.stdout or "")
+    return tuple(int(g) for g in m.groups()) if m else None
 
 class Stop(Exception):
     """Setup cannot go on; the message says why in plain words and what to do."""
@@ -195,6 +206,10 @@ class Setup:
                 raise Stop(f"Installing the Basecamp command-line tool did not work. Run this yourself and "
                            f"read what it says:\n    {INSTALL_CLI}\nthen run setup again (open a new terminal first).")
             self.out("Installed the Basecamp command-line tool.")
+        version = cli_version(self.run, env=bc_env())
+        if version is not None and version < MIN_BASECAMP:
+            raise Stop(f"The Basecamp command-line tool is version {'.'.join(map(str, version))}; basecamp-mate needs "
+                       f"{'.'.join(map(str, MIN_BASECAMP))} or newer. Update it with:\n    {INSTALL_CLI}\nthen run setup again.")
         r = self.run(["systemctl", "--user", "show-environment"], capture_output=True, text=True, timeout=30)
         if r.returncode != 0:
             raise Stop("This computer has no systemd user services, which keep the sync running in the background. "

@@ -19,7 +19,8 @@ basecamp-mate/bin/basecamp-mate setup
 Setup walks you through everything, one question at a time:
 
 1. It checks for what it needs and offers to install the Basecamp command-line tool if it
-   is missing.
+   is missing. basecamp-mate needs version 0.12.0 or newer (the first with subtasks); setup
+   stops on an older one and says how to update it.
 2. It asks where your firstmate home is.
 3. It signs the agent in to Basecamp: you open a link and type a code. Sign in as the
    agent's **own** Basecamp person (invite one to your project first, with an email you
@@ -77,6 +78,7 @@ policy. Each does one thing to the configured account and project:
 | `sync.py todo track` | command | tracks an existing to-do under a key, without relaying its old comments |
 | `sync.py todo comment` | command | comments on a tracked to-do |
 | `sync.py todo complete` | command | completes a tracked to-do (a decision to-do, or a to-do request when the work is done) |
+| `sync.py todo subtask` | command | completes one native subtask (decision) of a multi-decision to-do; the to-do completes once all are done |
 | `sync.py todo show` | command | reads a tracked to-do as Basecamp has it now (open or not, due date, repetition rule), read-only |
 | `sync.py post-message` | command | posts a message (subject and body) on the configured message board |
 | `sync.py status` | command | lists the sync runs on this computer, what each watches and with which login, and any `sync.py` running unrecorded (see "One home per project and login") |
@@ -520,6 +522,12 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   (`"todos": {"todoset": <id>}`, or the project's only one with `"todos": {}`), or in a
   to-do list (`--list <id>`, or `"todos": {"list": <id>}`), with an optional `--due`. The
   body file is the description in Markdown, rendered by the CLI (bare URLs become links).
+  A to-do with more than one decision passes every one, the first included, as its own
+  repeatable `--subtask "<question>"` (a lone subtask is refused), leaving the description
+  only context: each becomes a native Basecamp subtask of the to-do (`basecamp subtasks
+  create`, CLI 0.12.0+), assigned to the owner and kept in `todos.json` in order;
+  `sync.py todo subtask --todo <key or id> --number <n>` completes one (`basecamp subtasks
+  complete`) and completes the to-do once the last is done.
   The to-do is tracked in `todos.json` under the key; a key already tracked is refused, so
   a re-run never creates a duplicate. Each run reads the comments (and boosts) of every tracked to-do
   that is not completed and records each owner comment newer than that to-do's cursor as
@@ -736,7 +744,7 @@ and what it would write, install or refuse, and writes nothing.
 
 `bin/basecamp-mate setup` ([`setup_home.py`](setup_home.py), also `sync.py setup`) is the
 guided front end to `init` for people: it checks Python, the `basecamp` CLI (offering its
-installer) and systemd user services; asks for the home; signs the login in with
+installer; 0.12.0 or newer) and systemd user services; asks for the home; signs the login in with
 `basecamp profile create <login> --device-code` (or `auth login -P <login> --device-code`)
 under `BASECAMP_NO_KEYRING=1`; lists the login's accounts and projects to pick from and the
 project's people to pick the captain from; asks the yes/no questions (chat inbox, decision
@@ -754,7 +762,7 @@ defaults; without a terminal, anything that needs a person (a sign-in, an unansw
 refuses with what to do instead of asking.
 
 `bin/basecamp-mate doctor` ([`doctor.py`](doctor.py), also `sync.py doctor`) checks Python
-3.11+, the `basecamp` CLI and its version, systemd user services, then per home (every home
+3.11+, the `basecamp` CLI and its version (0.12.0 or newer), systemd user services, then per home (every home
 with installed `basecamp-sync-*` units, or `--home`): the firstmate home, the config, the
 login (`auth status` under a 20-second timeout and `BASECAMP_NO_KEYRING=1`, renewing an
 expired token as `run.sh` would), the project and the dock tools the config names, each card

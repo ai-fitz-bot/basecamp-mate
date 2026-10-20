@@ -7,7 +7,7 @@ description: Operating contract for a firstmate or second mate whose home mirror
 
 The sync has two layers. Tools are single-purpose: readers that the timer (every 30
 seconds) runs to append pending records, and commands you run to post (`reply`, `ask`, `answer`,
-`todo create|track|comment|complete`, `post-message`). Behaviors are the workflows the
+`todo create|track|comment|complete|subtask`, `post-message`). Behaviors are the workflows the
 config turns on, each composed from tools: the card mirror (`tables`, `repos`; off with
 `"cards": false` or without `tables`), the chat inbox (`chats`), chat asks (`ask_chat`),
 check-in answering (`checkins`), release announcements (`releases`), decision to-dos
@@ -113,7 +113,12 @@ With `todos` on, put each item waiting on the captain (a decision, approval, mer
 credential or login) to them as one to-do instead:
 `python3 $SYNC/sync.py todo create --home <home> --config <config> --key <stable key> --title "<plain question>" --body-file <file>`,
 with a Markdown description of the evidence, consequence, options, recommendation and the
-full URL of every PR. Their comment comes back as a `todo-comment` record, and their
+full URL of every PR. When it carries more than one decision, every one of them, the first
+included, is its own repeatable `--subtask "<question>"` by default, the title names the
+topic and the description holds only context, never a question outside the subtasks (each a native
+Basecamp subtask of the to-do, numbered from 1 in order; basecamp CLI 0.12.0+), complete
+each as it is answered with `sync.py todo subtask --todo <key> --number <n>`, and the to-do
+completes once all are done. Their comment comes back as a `todo-comment` record, and their
 boost on the to-do or on any comment under it (yours included) as a `boost` record. A decision: act
 on it (relaying first if this is not the main firstmate's home), then
 `sync.py todo complete --todo <key>`. Feedback that is not a decision: act on it and
@@ -274,7 +279,7 @@ The main firstmate's own home answers its questions itself rather than relaying.
 ## Never
 
 - Post, comment, complete, delete, archive or trash anything in Basecamp outside `sync.py`
-  and its commands (`reply`, `ask`, `answer`, `todo create|track|comment|complete`,
+  and its commands (`reply`, `ask`, `answer`, `todo create|track|comment|complete|subtask`,
   `post-message`), or hand-edit `todos.json`, `pings.json`, `notifications.json`, `threads.json`, `timer.json`, `assigned-todos.json`, `participants.json` or `unmonitored.json`.
   The sync's one automatic post is a release announcement: releases only (GitHub releases
   of the repos in `releases`, never merges or PRs), Message Board only. Never announce

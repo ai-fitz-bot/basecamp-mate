@@ -21,9 +21,8 @@ import argparse, calendar, os, re, shlex, shutil, subprocess, sys, time
 import init_home, runs
 from behaviors import COLUMNS
 from init_home import CHECK, CHECK_ID, CHECK_INBOX, unit_name
-from setup_home import Basecamp, INSTALL_CLI, default_home
+from setup_home import MIN_BASECAMP, Basecamp, INSTALL_CLI, cli_version, default_home
 
-MIN_BASECAMP = (0, 11, 0)
 STALE_MINUTES = 20  # the timer logs at least every 5 minutes (the card mirror's slot); this many without a line: not running
 UNREAD_CAP = 100  # Basecamp lists at most this many unread notifications
 SETUP = "basecamp-mate setup"
@@ -86,21 +85,17 @@ class Doctor:
             self.bad("The Basecamp command-line tool is not installed.", f"Fix: run  {INSTALL_CLI}")
             good = False
         else:
-            try:
-                r = self.run(["basecamp", "--version"], capture_output=True, text=True, timeout=15)
-                m = re.search(r"(\d+)\.(\d+)\.(\d+)", r.stdout)
-            except subprocess.TimeoutExpired:
-                m = None
-            if not m:
+            version = cli_version(self.run)
+            if version is None:
                 self.bad("The Basecamp command-line tool did not say its version.",
                          f"Fix: reinstall it with  {INSTALL_CLI}")
                 good = False
-            elif tuple(int(g) for g in m.groups()) < MIN_BASECAMP:
-                self.bad(f"The Basecamp command-line tool is version {m.group(0)}; basecamp-mate needs "
+            elif version < MIN_BASECAMP:
+                self.bad(f"The Basecamp command-line tool is version {'.'.join(map(str, version))}; basecamp-mate needs "
                          f"{'.'.join(map(str, MIN_BASECAMP))} or newer.", f"Fix: update it with  {INSTALL_CLI}")
                 good = False
             else:
-                self.ok(f"Basecamp command-line tool {m.group(0)}")
+                self.ok(f"Basecamp command-line tool {'.'.join(map(str, version))}")
         try:
             r = self.system.systemctl("show-environment")
             sd = r.returncode == 0

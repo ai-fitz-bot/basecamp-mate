@@ -32,6 +32,7 @@ class Stub:
         self.unread = 3  # the agent's unread notifications
         self.active = {}
         self.next_id = 1000
+        self.version = "0.12.0"
 
     def __call__(self, cmd, **kw):
         if cmd[0] in ("basecamp", "run.sh") or cmd[0].endswith("/run.sh"):
@@ -57,7 +58,7 @@ class Stub:
             i += 1
         self.calls.append(args)
         if args == ["--version"]:
-            return SimpleNamespace(stdout="basecamp version 0.11.0\n", stderr="", returncode=0)
+            return SimpleNamespace(stdout=f"basecamp version {self.version}\n", stderr="", returncode=0)
         if args == ["auth", "status"]:
             if self.timeout_auth:
                 raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
@@ -232,6 +233,13 @@ class SetupTest(Base):
         self.assertIn(["profile", "create", "firstmate", "--device-code"], self.stub.calls)
         self.assertIn("private browser window", self.text())
 
+    def test_too_old_cli_stops_naming_the_minimum(self):
+        self.stub.version = "0.11.0"
+        with self.assertRaises(setup_home.Stop) as e:
+            self.setup(project=PROJECT)
+        self.assertIn("version 0.11.0; basecamp-mate needs 0.12.0 or newer", str(e.exception))
+        self.assertIn(setup_home.INSTALL_CLI, str(e.exception))
+
     def test_not_a_home(self):
         with self.assertRaises(setup_home.Stop) as e:
             self.setup(home=self.tmp, project=PROJECT)
@@ -295,6 +303,15 @@ class DoctorTest(Base):
         self.assertEqual(self.doctor(), 0, self.text())
         self.assertIn("Everything looks good.", self.text())
         self.assertIn(f"\n{self.home}", self.text())  # found from the unit files
+
+    def test_too_old_cli(self):
+        self.healthy()
+        self.stub.version = "0.11.9"
+        self.assertEqual(self.doctor(self.home), 1)
+        self.assertIn("is version 0.11.9; basecamp-mate needs 0.12.0 or newer", self.text())
+        self.stub.version = "0.13.2"
+        self.assertEqual(self.doctor(self.home), 0, self.text())
+        self.assertIn("Basecamp command-line tool 0.13.2", self.text())
 
     def test_nothing_set_up(self):
         self.assertEqual(self.doctor(self.home), 1)

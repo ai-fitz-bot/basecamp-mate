@@ -37,7 +37,7 @@ class TodoStub(Stub):
         if cmd[0] == "basecamp":
             args = cmd[3:-3]
             core = args[2:] if args[:1] == ["-P"] else args
-            mine = (core[:2] in (["todos", "create"], ["todos", "complete"], ["comments", "create"], ["messages", "create"])
+            mine = (core[:2] in (["todos", "create"], ["todos", "complete"], ["subtasks", "create"], ["subtasks", "complete"], ["comments", "create"], ["messages", "create"])
                     or (core[:2] == ["api", "get"] and "/todos/" in core[2]))
             if mine:
                 self.profiles.append(args[1] if args[:1] == ["-P"] else None)
@@ -59,6 +59,10 @@ class TodoStub(Stub):
             return {"ok": True, "data": c}
         if core[:2] == ["messages", "create"]:
             return {"ok": True, "data": {"id": self.next_id, "app_url": f"https://x/messages/{self.next_id}"}}
+        if core[:2] == ["subtasks", "create"]:
+            return {"ok": True, "data": {"id": self.next_id, "title": core[3], "completed": False}}
+        if core[:2] == ["subtasks", "complete"]:
+            return {"ok": True, "data": None}
         if core[:2] == ["todos", "complete"]:
             self.todo_records[core[2]]["completed"] = True
             return {"ok": True, "data": None}
@@ -152,6 +156,59 @@ class TodoCreate(ToolBase):
         with self.assertRaises(RuntimeError):
             self.create()
         self.assertEqual(self.todos(), {})
+
+
+class TodoSubtasks(ToolBase):
+    QS = ["Merge the fix?", "Backport it to 1.x?"]
+
+    def test_every_decision_is_a_native_subtask_assigned_to_the_owner(self):
+        tid = self.create(title="The fix", subtasks=self.QS)
+        [call] = self.stub.made("todos create")
+        self.assertEqual(call[-1], "--description=Evidence: https://github.com/o/r/pull/1")  # context only
+        self.assertEqual(self.stub.made("subtasks create"),
+                         [["subtasks", "create", str(tid), q, "--assignees", str(CAPTAIN)] for q in self.QS])
+        rec = self.todos()["ta-x"]
+        self.assertEqual(rec["subtasks"], [{"text": "Merge the fix?", "done": None, "id": tid + 1},
+                                           {"text": "Backport it to 1.x?", "done": None, "id": tid + 2}])
+        self.assertEqual(set(self.stub.profiles), {"agent"})
+
+    def test_completing_each_completes_its_subtask_and_the_last_completes_the_todo(self):
+        tid = self.create(subtasks=self.QS)
+        self.assertTrue(self.sync().todo_subtask("ta-x", 2))
+        self.assertEqual(self.stub.made("subtasks complete"), [["subtasks", "complete", str(tid + 2)]])
+        self.assertEqual(self.stub.made("todos complete"), [])
+        self.assertFalse(self.sync().todo_subtask("ta-x", 2))  # already done
+        self.assertTrue(self.sync().todo_subtask(str(tid), 1))
+        self.assertEqual(self.stub.made("subtasks complete")[-1], ["subtasks", "complete", str(tid + 1)])
+        self.assertEqual(self.stub.made("todos complete"), [["todos", "complete", str(tid)]])
+        rec = self.todos()["ta-x"]
+        self.assertTrue(rec["completed"] and all(q["done"] for q in rec["subtasks"]))
+
+    def test_bad_number_dry_run_and_owner_refusal_change_nothing(self):
+        self.create(subtasks=self.QS)
+        with self.assertRaises(ValueError):
+            self.sync().todo_subtask("ta-x", 3)
+        self.assertFalse(self.sync(dry=True).todo_subtask("ta-x", 1))
+        self.stub.me = CAPTAIN
+        self.assertFalse(self.sync().todo_subtask("ta-x", 1))
+        self.assertEqual(self.stub.made("subtasks complete"), [])
+        self.assertFalse(any(q["done"] for q in self.todos()["ta-x"]["subtasks"]))
+
+    def test_dry_run_creates_no_subtasks(self):
+        self.assertIsNone(self.create(subtasks=self.QS, dry=True))
+        self.assertEqual(self.stub.made("subtasks create"), [])
+
+    def test_without_subtasks_the_todo_is_unchanged_and_has_none_to_complete(self):
+        self.create()
+        self.assertNotIn("subtasks", self.todos()["ta-x"])
+        self.assertEqual(self.stub.made("subtasks create"), [])
+        with self.assertRaises(ValueError):
+            self.sync().todo_subtask("ta-x", 1)
+        with self.assertRaises(ValueError):
+            self.create("ta-y", subtasks=["ok", " "])
+        with self.assertRaises(ValueError):  # every decision is a subtask, so never just one
+            self.create("ta-y", subtasks=["Merge the fix?"])
+        self.assertEqual(len(self.stub.made("todos create")), 1)
 
 
 class TodoComments(ToolBase):
@@ -291,6 +348,13 @@ class Cli(ToolBase):
                             [argv[0], "--home", self.home, "--config", os.path.join(self.cfgdir, "config.json"), *argv[1:]],
                             runner=self.stub)
         return code, out.getvalue()
+
+    def test_todo_subtasks(self):
+        self.assertEqual(self.run_cli("todo", "create", "--key", "k", "--title", "Two things",
+                                      "--subtask", "A?", "--subtask", "B?")[0], 0)
+        self.assertEqual([q["text"] for q in self.todos()["k"]["subtasks"]], ["A?", "B?"])
+        self.assertEqual(self.run_cli("todo", "subtask", "--todo", "k", "--number", "1")[0], 0)
+        self.assertTrue(self.todos()["k"]["subtasks"][0]["done"])
 
     def test_todo_lifecycle(self):
         self.assertEqual(self.run_cli("todo", "create", "--key", "k", "--title", "Merge?", "--body-file", "BODY")[0], 0)
