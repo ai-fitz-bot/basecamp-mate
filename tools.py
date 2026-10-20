@@ -1603,7 +1603,7 @@ class Tools:
 
         `subtasks` are the decisions when the to-do carries more than one, every one
         included: each becomes a native Basecamp subtask of the to-do (`basecamp
-        subtasks`, CLI 0.12.0+), assigned to the owner, kept in the record in order,
+        subtasks`, CLI 0.12.0+), unassigned so the owner is notified once (by the parent), kept in the record in order,
         each completed by `todo_subtask`.
 
         It goes loose on the configured to-do set ("todos": {"todoset": id}, or the
@@ -1649,7 +1649,7 @@ class Tools:
             self.save_json("todos.json", state)
         self.log(f"todo create {key}: todo {tid} {data.get('app_url') or ''}".rstrip())
         for n, q in enumerate(subtasks, 1):  # recorded one by one, so the record matches Basecamp if one fails
-            sub = self.bc("subtasks", "create", str(tid), q["text"], "--assignees", str(self.captain)) or {}
+            sub = self.bc("subtasks", "create", str(tid), q["text"]) or {}
             with self.locked("todos.json"):
                 state = self.load("todos.json", {})
                 state[key].setdefault("subtasks", []).append(dict(q, id=sub["id"]))
