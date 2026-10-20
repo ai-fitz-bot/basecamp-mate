@@ -115,10 +115,10 @@ credential or login) to them as one to-do instead:
 with a Markdown description of the evidence, consequence, options, recommendation and the
 full URL of every PR. When it carries more than one decision, every one of them, the first
 included, is its own repeatable `--subtask "<question>"` by default, the title names the
-topic and the description holds only context, never a question outside the checklist (a numbered checklist on the to-do, since Basecamp to-dos
-have no sub-items), tick each as it is answered with
-`sync.py todo subtask --todo <key> --number <n>`, and the to-do completes once all are
-ticked. Their comment comes back as a `todo-comment` record, and their
+topic and the description holds only context, never a question outside the subtasks (each a native
+Basecamp subtask of the to-do, numbered from 1 in order; basecamp CLI 0.12.0+), complete
+each as it is answered with `sync.py todo subtask --todo <key> --number <n>`, and the to-do
+completes once all are done. Their comment comes back as a `todo-comment` record, and their
 boost on the to-do or on any comment under it (yours included) as a `boost` record. A decision: act
 on it (relaying first if this is not the main firstmate's home), then
 `sync.py todo complete --todo <key>`. Feedback that is not a decision: act on it and

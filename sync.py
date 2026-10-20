@@ -213,7 +213,7 @@ def todo_cli(argv, runner):
              "track": "Track an existing to-do under a key; its comments so far are not relayed.",
              "comment": "Comment on a tracked to-do.",
              "complete": "Mark a tracked to-do complete.",
-             "subtask": "Tick one subtask of a tracked to-do as answered; the to-do completes once all are ticked.",
+             "subtask": "Complete one subtask of a tracked to-do, answered; the to-do completes once all are done.",
              "show": "Print a tracked to-do as Basecamp has it now: open or not, due date, repetition rule."}
     if sub not in descs:
         print("usage: sync.py todo {create,track,comment,complete,subtask,show} --home <home> --config <config.json> ...", file=sys.stderr)
@@ -227,7 +227,7 @@ def todo_cli(argv, runner):
         ap.add_argument("--list", help="a to-do list id (default: the config's, else loose on the to-do set)")
         ap.add_argument("--due", help="YYYY-MM-DD")
         ap.add_argument("--subtask", action="append", default=[],
-                        help="one question of the decision, repeatable: each becomes its own checklist item")
+                        help="one decision, repeatable, every one when there are several: each becomes a native Basecamp subtask")
     elif sub == "track":
         ap.add_argument("--todo", required=True, type=int, help="the to-do's id")
     else:

@@ -244,11 +244,12 @@ recommendation, and the full URL of every PR it concerns. One matter per to-do. 
 makes the command safe to re-run: a key already tracked is never created twice.
 
 When the to-do carries more than one decision, every one of them, the first and main one
-included, is its own `--subtask "<question>"` (repeatable): they show as a numbered
-checklist on the to-do. The title then names the topic rather than asking, and the
-description holds only context and evidence, never a question outside the checklist. As each is
-answered, tick it with `python3 SYNC/sync.py todo subtask C --todo <key> --number <n>`; the to-do completes
-itself once the last one is ticked. A single question needs no subtask.
+included, is its own `--subtask "<question>"` (repeatable): each becomes a native Basecamp
+subtask of the to-do, numbered from 1 in the order given, assigned to the captain. The
+title then names the topic rather than asking, and the description holds only context and
+evidence, never a question outside the subtasks. As each is answered, complete it with
+`python3 SYNC/sync.py todo subtask C --todo <key> --number <n>`; the to-do completes
+itself once the last one is done. A single question needs no subtask.
 
 Then wait for their comment or boost; do not ask the same thing in chat as well. When a
 `todo-comment` or a `boost` on the to-do or one of its comments arrives:

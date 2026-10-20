@@ -78,7 +78,7 @@ policy. Each does one thing to the configured account and project:
 | `sync.py todo track` | command | tracks an existing to-do under a key, without relaying its old comments |
 | `sync.py todo comment` | command | comments on a tracked to-do |
 | `sync.py todo complete` | command | completes a tracked to-do (a decision to-do, or a to-do request when the work is done) |
-| `sync.py todo subtask` | command | ticks one question of a multi-question decision to-do; the to-do completes once all are ticked |
+| `sync.py todo subtask` | command | completes one native subtask (decision) of a multi-decision to-do; the to-do completes once all are done |
 | `sync.py todo show` | command | reads a tracked to-do as Basecamp has it now (open or not, due date, repetition rule), read-only |
 | `sync.py post-message` | command | posts a message (subject and body) on the configured message board |
 | `sync.py status` | command | lists the sync runs on this computer, what each watches and with which login, and any `sync.py` running unrecorded (see "One home per project and login") |
@@ -524,10 +524,10 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   body file is the description in Markdown, rendered by the CLI (bare URLs become links).
   A to-do with more than one decision passes every one, the first included, as its own
   repeatable `--subtask "<question>"` (a lone subtask is refused), leaving the description
-  only context: Basecamp to-dos have no sub-items, so they follow the description as a
-  numbered ☐ checklist, kept in `todos.json`; `sync.py todo subtask --todo <key or id>
-  --number <n>` ticks one (☑, rewriting the description) and completes the to-do once the
-  last is ticked.
+  only context: each becomes a native Basecamp subtask of the to-do (`basecamp subtasks
+  create`, CLI 0.12.0+), assigned to the owner and kept in `todos.json` in order;
+  `sync.py todo subtask --todo <key or id> --number <n>` completes one (`basecamp subtasks
+  complete`) and completes the to-do once the last is done.
   The to-do is tracked in `todos.json` under the key; a key already tracked is refused, so
   a re-run never creates a duplicate. Each run reads the comments (and boosts) of every tracked to-do
   that is not completed and records each owner comment newer than that to-do's cursor as
