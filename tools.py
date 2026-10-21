@@ -106,6 +106,15 @@ class Tools:
         p = self.path(name)
         return json.load(open(p)) if os.path.exists(p) else default
 
+    def local_files(self, pattern):
+        """(name, content bytes) of each file beside the config whose whole name matches regex `pattern`, by name."""
+        out = []
+        for name in sorted(os.listdir(self.dir)):
+            if pattern.fullmatch(name) and os.path.isfile(self.path(name)):
+                with open(self.path(name), "rb") as f:
+                    out.append((name, f.read()))
+        return out
+
     def save_json(self, name, value):
         tmp = self.path(name + ".tmp")
         with open(tmp, "w") as f:
@@ -311,6 +320,18 @@ class Tools:
         """Post an HTML message on Message Board `board`; returns the message. No refusal rules."""
         return self.bc("api", "post", f"/buckets/{self.project}/message_boards/{board}/messages.json",
                        "-d", json.dumps({"subject": subject, "content": content, "status": "active"})) or {}
+
+    def uploads_list(self, vault, project):
+        """The uploads in Docs & Files folder `vault` of bucket `project`."""
+        return self.bc("uploads", "list", "--vault", str(vault), "--all", project=project) or []
+
+    def upload_create(self, path, vault, project):
+        """Upload local file `path` into Docs & Files folder `vault` of bucket `project`; returns the upload."""
+        return self.bc("uploads", "create", path, "--vault", str(vault), project=project) or {}
+
+    def upload_replace(self, upload, path, project):
+        """Replace upload `upload`'s file with local file `path` as a new version: same id, URL and name; nobody is notified."""
+        return self.bc("files", "replace", str(upload), path, project=project) or {}
 
     def inbox_note(self, fm_home, request_id, body):
         """Queue `body` as a note in firstmate home `fm_home`'s inbox through its bin/fm-inbox.sh.

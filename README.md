@@ -98,7 +98,7 @@ agent's side of each is in [`prompts/base.md`](prompts/base.md).
 The timer runs `run.sh` every 30 seconds, and each behavior's step runs when it is due
 (`timer.json` keeps when each last ran): `notifications` and `inbox-delivery` every run;
 `card-mirror`, `release-announcements`, `checkin-answering` and `assigned-todos` every 5
-minutes; `security-advisories` hourly; and `chat-inbox`, `decision-todos`, `reports` and
+minutes; `security-advisories` hourly; `backup` daily; and `chat-inbox`, `decision-todos`, `reports` and
 `pings` hourly, as the repair sweep behind `notifications`, which reads their surfaces as soon as something changes.
 Without `notifications` (no `profile`, or `"notifications": false`) those four run every
 5 minutes instead. `sync.py --all` runs every step at once.
@@ -119,6 +119,7 @@ Without `notifications` (no `profile`, or `"notifications": false`) those four r
 | `pings` | `pings` | `--pings` | Ping reader (hourly sweep) | `reply` to each line, in the Ping |
 | `inbox-delivery` | `inbox` | `--inbox` | deliver each new pending record as a firstmate inbox note | handle the note, then `fm-inbox.sh drain --ack` |
 | `session-alert` | `session_alert` | `--session-alert [MINUTES]` (with `--inbox`; setup asks) | tell the owner once in chat when no firstmate session holds the lock while inbox notes wait (each minute) | start the session again |
+| `backup` | `backup` | `--backup <Docs & Files folder URL>` (setup keeps an existing one) | upload the config and state files that changed to the folder, one latest copy of each (daily) | `sync.py backup` to back up now |
 
 The boundary: behaviors never run a CLI themselves (every Basecamp, GitHub, backlog or
 Lavish call goes through a tool), and tools never decide whether to run or what to do
@@ -512,6 +513,19 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   the login lacks access) is recorded once as
   `dependabot-unreadable`. Alerts are never dismissed or changed. Code-scanning alerts and
   the global advisory database are not read.
+- Backup: with the optional `backup` config, once a day (and now with `sync.py backup`)
+  the config and its JSON and JSONL state files (never a lock, a `.tmp`, `sync.log`, a hand
+  copy such as `config.json.bak-...`, or `backup.json`) are uploaded to that Docs & Files
+  folder, which may be in another project. Only a file whose content changed since its last
+  upload is sent: as a new version of its upload there (`basecamp files replace`, so the
+  folder holds one file per name, nobody is notified, and Basecamp keeps the old versions
+  in that upload's history), or as a new upload when the folder has none of that name yet.
+  A file holding a credential is never uploaded: any file with a token-shaped value, and
+  `config.json` with a key naming one (`token`, `secret`, `password`, `api_key`, ...); it
+  is logged and skipped. Nothing in the folder is ever deleted or trashed. A failed upload
+  is logged and retried on the next backup. To restore, download the files from the folder
+  (in Basecamp, or `basecamp files download <upload id>`) into the config's directory while
+  the timer is stopped.
 - Chat questions: for each chat id in the optional `chats` config list, each run reads the
   chat's lines newer than a cursor kept in `chats.json` (the first run only sets the
   cursor, so older history is not relayed). A captain line that mentions the acting user
@@ -879,6 +893,9 @@ or by hand from
 - `advisories` (optional): `{"repos": ["owner/name", ...]}`: record each new security
   advisory and each new or reopened open Dependabot alert of these GitHub repositories
   once. See Security advisories.
+- `backup` (optional): `{"project": <bucket id>, "vault": <Docs & Files folder id>}`: keep
+  one latest copy of the config and each state file in that folder, uploaded daily when
+  changed. See Backup under Safety bounds.
 - `cards` (optional): the card mirror's switch. Absent means on when `tables` is set and
   off otherwise; `false` turns it off even with `tables` present.
 - `repos` (card mirror): backlog repo name -> board name.
@@ -902,6 +919,7 @@ claim, in `~/.local/state/basecamp-mate/runs/`; see "One home per project and lo
 | `threads.json` | the script | per followed thread (`<bucket>:<recording>`): its type and title, comment cursor, owner comments recorded, acknowledgement boosts queued and done, boost counts and boosts seen, comments replied to |
 | `pings.json` | the script | `since` (the Ping reader's first run) and, per Ping chat id, its bucket, title, URL, line cursor, owner lines recorded, acknowledgement boosts queued and done, boost counts and boosts seen, lines replied to |
 | `unmonitored.json` | the script | unmonitored key -> the first notification (or boost) and recording recorded, when, how many were seen, and the owner's decision once handled |
+| `backup.json` | the script | per backed-up file: its upload id in the backup folder, the SHA-256 of the content last uploaded, and when |
 | `sync.lock` | the script | the shared state lock held by a timer run or a command |
 | `participants.json` | the script | the project's non-client person ids, as last read for `"participants": {"project": true}` |
 | `todos.json` | the script | to-do key -> to-do id, title, URL, created and completed times, comment cursor, owner comments recorded, acknowledgement boosts queued and done, comments replied to; for a to-do request (`request-<id>`), also who assigned it (`request`), how many times it was assigned (`requests`), a digest of its name and description, the project it is in (`bucket`, `project_name`), and why it closed (`closed`) |
