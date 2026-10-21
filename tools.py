@@ -1733,8 +1733,8 @@ class Tools:
         return True
 
     def todo_complete(self, ref):
-        """Mark a tracked to-do complete; its comments are no longer read. A card request is completed the same way,
-        which Basecamp shows by moving the card to its table's Done column."""
+        """Mark a tracked to-do complete; its comments are no longer read. A card request is completed
+        by moving the card to its table's Done column (a card already done is recorded completed)."""
         self.need_todos()
         key, rec = self.tracked(ref)
         if rec.get("completed"):
@@ -1749,8 +1749,12 @@ class Tools:
             self.log(f"dry todo complete {key}: complete todo {rec['todo']}")
             return False
         if rec.get("type") == "card":
-            self.bc("api", "post", f"/buckets/{rec.get('bucket') or self.project}/todos/{rec['todo']}/completion.json",
-                    project=rec.get("bucket"))
+            bucket = rec.get("bucket") or self.project
+            c = self.bc("api", "get", f"/buckets/{bucket}/card_tables/cards/{rec['todo']}.json", project=bucket) or {}
+            if c.get("completed"):
+                self.log(f"todo complete {key}: card {rec['todo']} is already done in Basecamp")
+            else:
+                self.bc("cards", "done", str(rec["todo"]), project=bucket)
         else:
             self.bc("todos", "complete", str(rec["todo"]), project=rec.get("bucket"))
         with self.locked("todos.json"):

@@ -24,7 +24,7 @@ def card(id, by=CAPTAIN, to=(ACTING,), title="Address security issues", content=
 
 
 class CardStub(AssignStub):
-    """Adds cards: listed in /my/assignments.json as "card", refetched by id, and completed through the completion API."""
+    """Adds cards: listed in /my/assignments.json as "card", refetched by id, and completed with `basecamp cards done`."""
 
     def __init__(self):
         super().__init__()
@@ -46,9 +46,9 @@ class CardStub(AssignStub):
             if core[:2] == ["api", "get"] and "/card_tables/cards/" in core[2]:
                 self.calls.append(core)
                 return ok(self.cards[core[2].rsplit("/", 1)[1][:-5]])
-            if core[:2] == ["api", "post"] and core[2].endswith("/completion.json"):
+            if core[:2] == ["cards", "done"]:
                 self.calls.append(core)
-                self.cards[core[2].split("/")[-2]]["completed"] = True
+                self.cards[core[2]]["completed"] = True
                 return ok({})
         return super().__call__(cmd, **kw)
 
@@ -87,8 +87,15 @@ class Sweep(CardBase):
                          [("card-request", None), ("todo-comment", "card"), ("card-request-update", None)])
         s = self.sync()
         self.assertTrue(s.todo_complete("request-42"))
-        self.assertIn(["api", "post", f"/buckets/{PROJECT}/todos/42/completion.json"],
-                      [c[:3] for c in self.stub.calls])
+        self.assertIn(["cards", "done", "42"], [c[:3] for c in self.stub.calls])
+        self.assertTrue(self.request()["completed"])
+
+    def test_completing_a_card_already_done_records_it_completed(self):
+        self.add_card(card(42))
+        self.poll()
+        self.stub.cards["42"]["completed"] = True
+        self.assertTrue(self.sync().todo_complete("request-42"))
+        self.assertNotIn(["cards", "done"], [c[:2] for c in self.stub.calls])
         self.assertTrue(self.request()["completed"])
 
     def test_the_owner_completing_it_closes_the_request(self):
