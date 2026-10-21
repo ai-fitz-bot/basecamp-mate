@@ -915,6 +915,13 @@ class Checkins(Base):
         self.assertFalse(self.sync().answer(1, "again"))  # Basecamp already has today's answer
         self.assertEqual(len([a for a in self.stub.calls if a[:3] == ["checkins", "answer", "create"]]), 1)
 
+    def test_answer_renders_markdown(self):
+        self.sync().main([])
+        self.assertTrue(self.sync().answer(1, "**Shipped**: the *map* fix\n- one `<b>`\n- [PR](https://x.io/1)"))
+        create, = [a for a in self.stub.calls if a[:3] == ["checkins", "answer", "create"]]
+        self.assertEqual(create[4], '<div><strong>Shipped</strong>: the <em>map</em> fix</div>'
+                                    '<ul><li>one &lt;b&gt;</li><li><a href="https://x.io/1">PR</a></li></ul>')
+
     def test_answer_refused_as_owner_or_dry(self):
         self.stub.me = CAPTAIN
         self.assertFalse(self.sync().answer(1, "x"))
@@ -1091,3 +1098,32 @@ class CardsOff(Releases):
         self.assertTrue(self.make().cards)
         self.make().main([item("a")])
         self.assertIn(["cards", "create"], [a[:2] for a in self.stub.calls])
+
+
+class RenderReply(unittest.TestCase):
+    def test_plain_text_unchanged(self):
+        self.assertEqual(sync.render_reply("On it.\nSoon <b> & more\n\nDone."),
+                         "<div>On it.<br>Soon &lt;b&gt; &amp; more</div><div>Done.</div>")
+
+    def test_inline_markdown(self):
+        self.assertEqual(sync.render_reply("**Bold** and __b__, *it* and _it_, `a *b* <c>`, ~~gone~~, snake_case_name"),
+                         "<div><strong>Bold</strong> and <strong>b</strong>, <em>it</em> and <em>it</em>, "
+                         "a *b* &lt;c&gt;, <strike>gone</strike>, snake_case_name</div>")
+
+    def test_links(self):
+        self.assertEqual(sync.render_reply('[the "PR"](https://github.com/o/r/pull/2) or https://x.io/a_b'),
+                         '<div><a href="https://github.com/o/r/pull/2">the &quot;PR&quot;</a> or '
+                         '<a href="https://x.io/a_b">https://x.io/a_b</a></div>')
+
+    def test_lists_headings_quotes_and_code(self):
+        md = "## Today\nDid:\n- one\n* two\n1. first\n2) second\n\n> quoted\n```\nx < y\n  z\n```\nafter"
+        self.assertEqual(sync.render_reply(md),
+                         "<div><strong>Today</strong></div><div>Did:</div><ul><li>one</li><li>two</li></ul>"
+                         "<ol><li>first</li><li>second</li></ol><blockquote>quoted</blockquote>"
+                         "<pre>x &lt; y<br>  z</pre><div>after</div>")
+
+    def test_no_raw_html_or_newlines(self):
+        body = sync.render_reply("<script>x</script>\n- <i>a</i>\n\n**<b>**")
+        self.assertNotIn("<script>", body)
+        self.assertNotIn("<i>", body)
+        self.assertNotIn("\n", body)

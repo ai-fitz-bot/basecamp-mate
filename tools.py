@@ -1557,7 +1557,8 @@ class Tools:
             self.log(f"dry ask: post in chat {self.ask_chat}")
             return False
         body = render_reply(text)
-        body = body.replace("<div>", "<div>" + self.owner_mention() + " ", 1) if body else "<div>" + self.owner_mention() + "</div>"
+        body = (body.replace("<div>", "<div>" + self.owner_mention() + " ", 1) if body.startswith("<div>")
+                else "<div>" + self.owner_mention() + "</div>" + body)
         line = self.bc("api", "post", f"/buckets/{self.project}/chats/{self.ask_chat}/lines.json",
                        "-d", json.dumps({"content": body, "content_type": "text/html"})) or {}
         self.log(f"ask: posted line {line.get('id')} in chat {self.ask_chat}")
@@ -1944,9 +1945,85 @@ def is_due(q, now):
 
 
 def render_reply(text):
-    """Plain text to comment HTML: escaped, one <div> per paragraph, no raw newlines."""
-    paras = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
-    return "".join("<div>" + "<br>".join(html.escape(l) for l in p.splitlines()) + "</div>" for p in paras)
+    """Markdown to Basecamp rich text: escaped, one <div> per paragraph, no raw newlines.
+
+    Handles **bold**, *italic*, `code` (shown plain), links, bullet and numbered lists,
+    headings (bold), > quotes and ``` fenced blocks, using only tags Basecamp keeps.
+    Plain text renders as before; no HTML in the text passes through.
+    """
+    out, para, items, kind = [], [], [], None
+    lines = text.strip().replace("\r\n", "\n").split("\n")
+
+    def flush():
+        nonlocal kind
+        if para:
+            out.append("<div>" + "<br>".join(para) + "</div>")
+            para.clear()
+        if items:
+            out.append(f"<{kind}>" + "".join(f"<li>{i}</li>" for i in items) + f"</{kind}>")
+            items.clear()
+        kind = None
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        i += 1
+        if line.startswith("```"):
+            flush()
+            block = []
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                block.append(html.escape(lines[i]))
+                i += 1
+            i += 1
+            out.append("<pre>" + "<br>".join(block) + "</pre>")
+            continue
+        m = re.match(r"([*+-]|\d+[.)])\s+(.*)", line)
+        if m:
+            want = "ul" if m.group(1) in "*+-" else "ol"
+            if para or kind != want:
+                flush()
+            kind = want
+            items.append(md_inline(m.group(2)))
+            continue
+        if not line:
+            flush()
+            continue
+        if items:
+            flush()
+        h = re.match(r"#{1,6}\s+(.*)", line)
+        q = re.match(r">\s?(.*)", line)
+        if h:
+            flush()
+            out.append(f"<div><strong>{md_inline(h.group(1))}</strong></div>")
+        elif q:
+            flush()
+            out.append(f"<blockquote>{md_inline(q.group(1))}</blockquote>")
+        else:
+            para.append(md_inline(line))
+    flush()
+    return "".join(out)
+
+
+def md_inline(text):
+    """One line of Markdown to escaped HTML: `code` kept literal, links, **bold**, *italic*, ~~strike~~."""
+    codes = []
+
+    def code(m):
+        codes.append(html.escape(m.group(1)))
+        return f"\0{len(codes) - 1}\0"
+    text = re.sub(r"`([^`]+)`", code, text)
+    out, pos = [], 0
+    for m in re.finditer(r"\[([^\]]+)\]\((https?://[^)\s]+)\)|(https?://[^\s<>()]+)", text):
+        out.append(html.escape(text[pos:m.start()]))
+        url = m.group(2) or m.group(3)
+        out.append(f'<a href="{html.escape(url)}">{html.escape(m.group(1) or url)}</a>')
+        pos = m.end()
+    out.append(html.escape(text[pos:]))
+    s = "".join(out)
+    s = re.sub(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", r"<strong>\2</strong>", s)
+    s = re.sub(r"(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])", r"<em>\1</em>", s)
+    s = re.sub(r"(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w_])", r"<em>\1</em>", s)
+    s = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<strike>\1</strike>", s)
+    return re.sub(r"\0(\d+)\0", lambda m: codes[int(m.group(1))], s)
 
 
 def is_emoji(content, emoji):

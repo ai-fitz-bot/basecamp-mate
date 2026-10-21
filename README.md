@@ -500,7 +500,7 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   through the same record, cursor and 👀 rules.
 - Asking the owner: with `ask_chat` set,
   `sync.py ask --home <home> --config <config.json> --body-file <file>` posts the file's
-  plain text (rendered like a reply) as a new line in that chat as the acting user,
+  Markdown (rendered like a reply) as a new line in that chat as the acting user,
   starting with an @mention of the owner (their person record's `attachable_sgid`, read
   from `/people/<id>.json`). Post one question or decision per line. With no profile, or a
   profile signed in as the owner, it posts nothing; `--dry-run` logs only. The owner's
@@ -512,8 +512,8 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   `start_date` has been reached (and any `end_date` not passed), and its `hour`:`minute`
   has passed in the configured `timezone` (the machine's local time when unset). One the
   acting user already answered today is not recorded. The run never answers;
-  `sync.py answer --home <home> --config <config.json> --question <id> --body-file <file>`
-  does, through `basecamp checkins answer create <id> <content> --date <today>`, at most
+  `sync.py answer --home <home> --config <config.json> --question <id> --body-file <file>` (Markdown,
+  rendered like a reply) does, through `basecamp checkins answer create <id> <content> --date <today>`, at most
   once per question per day (checked in `checkins.json` and in the question's answers),
   and under the same refusal rules as `ask`.
 - Decision to-dos: with `todos` set,
@@ -601,8 +601,8 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   it"); other comments and approvals get 👍 ("got it"). The sync never removes a 👀. Once the relaying agent
   has the answer it runs
   `sync.py reply --home <home> --config <config.json> --recording <question comment id> --body-file <file>`,
-  which posts the file's plain text (HTML-escaped, one `<div>` per paragraph) as a comment
-  on that card as the acting user, then removes the acting user's 👀 from the question; no
+  which posts the file's Markdown (rendered to Basecamp rich text: bold, italic, links,
+  lists, quotes and code blocks, everything else HTML-escaped) as a comment on that card as the acting user, then removes the acting user's 👀 from the question; no
   👍 is added. The question id is recorded in the card's `replied` list in `map.json` and a
   second reply is refused unless `--again` is passed. A failed post removes nothing, so the
   👀 stays. With no profile, or a profile signed in as the captain, it posts nothing;
