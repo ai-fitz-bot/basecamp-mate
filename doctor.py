@@ -16,10 +16,10 @@ Without --home it checks every home that has basecamp-sync services installed (f
 from the unit files), else $FM_HOME or ~/firstmate. Nothing is written, except that an
 expired sign-in is renewed the way each sync run renews it.
 """
-import argparse, calendar, os, re, shlex, shutil, subprocess, sys, time
+import argparse, calendar, json, os, re, shlex, shutil, subprocess, sys, time
 
 import init_home, runs
-from behaviors import COLUMNS
+from behaviors import COLUMNS, holds_secret
 from init_home import CHECK, CHECK_ID, CHECK_INBOX, unit_name
 from setup_home import MIN_BASECAMP, Basecamp, INSTALL_CLI, cli_version, default_home
 
@@ -252,6 +252,29 @@ class Doctor:
         else:
             self.ok("the participants' email domains can be matched")
 
+    def backup(self, bc, cfg, config):
+        """The backup folder opens, the config holds no credential (it would be skipped), and the last backup is recent."""
+        b = cfg.get("backup")
+        if not isinstance(b, dict):
+            return
+        out = bc.call("api", "get", f"/buckets/{b.get('project')}/vaults/{b.get('vault')}.json")
+        if not out.get("ok"):
+            self.bad(f"The backup folder {b.get('vault')} in project {b.get('project')} cannot be opened: {out.get('error')}",
+                     "Fix: invite the agent's person to that project, or point \"backup\" in the config at a folder it can open.")
+            return
+        self.ok(f"backup folder {(out.get('data') or {}).get('title')!r}")
+        with open(config, "rb") as f:
+            secret = holds_secret("config.json", f.read())
+        if secret:
+            self.bad(f"The config holds a credential ({secret}), so the backup skips it.",
+                     "Fix: move the credential out of the config; it should hold only ids and settings.")
+        p = os.path.join(os.path.dirname(config), "backup.json")
+        at = (json.load(open(p)).get("files", {}).get("config.json", {}) if os.path.exists(p) else {}).get("at")
+        if at:
+            self.ok(f"config last backed up {at}")
+        else:
+            self.skip("no backup has run yet (it runs daily; sync.py backup runs it now)")
+
     def services(self, home, config, cfg):
         name = unit_name(home)
         units = [(f"{name}.timer", "the sync timer (every 30 seconds)", f"{name}.service")]
@@ -346,6 +369,7 @@ class Doctor:
                 self.card_tables(bc, cfg)
                 self.notifications(bc, cfg)
                 self.participants(bc, cfg)
+                self.backup(bc, cfg, c)
             elif cli_ok:
                 self.skip("skipped the project and card table checks until the problems above are fixed")
             if sd_ok:

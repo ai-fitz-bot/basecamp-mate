@@ -10,7 +10,7 @@ false), the chat inbox ("chats"), chat asks ("ask_chat"), check-in answering
 ("checkins"), release announcements ("releases"), decision to-dos ("todos"),
 reports ("message_board"), Pings ("pings": the owner's direct messages to the agent's
 login), to-do requests ("assigned_todos": to-dos the owner assigns to the agent's login),
-inbox delivery ("inbox"), the session alert ("session_alert") and notifications (on with a "profile": every run reads the agent
+inbox delivery ("inbox"), the session alert ("session_alert"), the state backup ("backup") and notifications (on with a "profile": every run reads the agent
 login's notifications and boosts and runs the reader for each thread that changed, and
 records the owner's unmonitored input; `sync.py unmonitored` keeps their keys).
 prompts/base.md is the agent's side of each behavior.
@@ -27,7 +27,9 @@ Deterministic, no model calls. Safety bounds, enforced here:
     the agent's login (with "scope": "account", any project's) are read and
     acknowledged with a 👀; the agent login's notifications and boosts are read across
     the account, but only this project's (and those Pings and requests) are acted on,
-    and an owner's @mention of the agent anywhere in the project is relayed;
+    and an owner's @mention of the agent anywhere in the project is relayed; with
+    "backup" on, the config and state files are uploaded to its Docs & Files folder
+    (a changed file as a new version of its upload there);
   - nothing is ever deleted, trashed or archived, except the acting user's own 👀
     boost once a question is answered; the timer run posts no comment, and its only
     writes besides the card mirror are 👀/👍 acknowledgement boosts, marking the agent
@@ -56,6 +58,7 @@ Usage: sync.py --home <home> --config <config.json> [--all] [--dry-run] [--inclu
        sync.py todo show --home <home> --config <config.json> --todo <key or id>
        sync.py post-message --home <home> --config <config.json> --subject <text> --body-file <file> [--dry-run]
        sync.py unmonitored list|handle|forget --home <home> --config <config.json> [--key <key>] [--decision <text>] [--dry-run]
+       sync.py backup --home <home> --config <config.json> [--dry-run]
        sync.py behaviors --home <home> --config <config.json>
        sync.py setup [--answers <file.json>] [--yes]      (guided; also bin/basecamp-mate setup)
        sync.py doctor [--home <home>] [--config <config.json>]
@@ -310,6 +313,16 @@ def cli(argv=None, runner=subprocess.run):
         ap.add_argument("--dry-run", action="store_true")
         a = ap.parse_args(argv[1:])
         return command(a, "post-message", lambda s: s.post_message(a.subject, read(a.body_file)), runner)
+    if argv[:1] == ["backup"]:
+        ap = common("sync.py backup", "Upload the config and state files that changed to the configured backup folder now.")
+        ap.add_argument("--dry-run", action="store_true")
+        a = ap.parse_args(argv[1:])
+        b = Sync(a.home, a.config, runner=runner).behaviors["backup"]
+        if not b.on:
+            print('sync.py backup: no "backup" in the config: add {"project": <bucket id>, "vault": <Docs & Files folder id>}',
+                  file=sys.stderr)
+            return 2
+        return command(a, "backup", lambda s: s.behaviors["backup"].run(), runner)
     if argv[:1] == ["listen"]:
         ap = common("sync.py listen", "Retired: notifications on the timer replaced the event listener; logs that and exits.")
         ap.add_argument("--once", action="store_true", help=argparse.SUPPRESS)

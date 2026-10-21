@@ -401,18 +401,19 @@ class Setup:
             chosen[k] = False
         chosen["assign"] = chosen["assign"] and chosen["cards"]
         config = os.path.join(home, "data", "basecamp-sync", "config.json")
-        force = False
+        force, backup = False, None
         if os.path.exists(config):
             force = self.ask.yes("replace", "This home is already connected. Replace its settings with these answers?", True)
             if not force:
                 raise Stop("Nothing was changed.")
+            backup = json.load(open(config)).get("backup")  # set by hand or --backup; setup keeps it
         printed = []
         init = Init(f"https://app.basecamp.com/{account}/projects/{project}", login, home, captain=captain,
                     create_missing=chosen["cards"], force=force, cards=chosen["cards"], assign_captain=chosen["assign"], todos=chosen["todos"],
                     reports=chosen["reports"], checkins=timezone if chosen["checkins"] else None,
                     releases=chosen["releases"], inbox=chosen["inbox"],
                     session_alert=15 if chosen["session_alert"] else None,
-                    pings=chosen["pings"], chats=chosen["chat"], no_keyring=True,
+                    pings=chosen["pings"], backup=backup or None, chats=chosen["chat"], no_keyring=True,
                     runner=lambda cmd, **kw: self.run(cmd, **{**kw, "env": bc_env()}),
                     system=self.system, sync_dir=self.sync_dir, out=printed.append)
         try:

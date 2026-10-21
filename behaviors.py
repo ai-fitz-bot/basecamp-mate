@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from tools import AUTHORITY, THREADS, history, now_iso, parse_reading, recording_type
 
 COLUMNS = ("Triage", "Not now", "Figuring it out", "In progress", "Ready for QA", "Done")
-SLOW, SWEEP = 300, 3600  # seconds: the card mirror's, releases' and check-ins' cadence; the hourly repair sweep's
+SLOW, SWEEP, DAY = 300, 3600, 86400  # seconds: the card mirror's, releases' and check-ins' cadence; the hourly repair sweep's; the backup's
 
 
 class Behavior:
@@ -36,7 +36,7 @@ class Behavior:
         """Where and how often it runs, as `sync.py behaviors` prints it."""
         if not self.timer:
             return "agent"
-        return {0: "each run", SLOW: "5 min", SWEEP: "hourly"}.get(self.every, f"{self.every}s")
+        return {0: "each run", SLOW: "5 min", SWEEP: "hourly", DAY: "daily"}.get(self.every, f"{self.every}s")
 
     def run(self, items=None):
         pass
@@ -717,6 +717,114 @@ class SessionAlert(Behavior):
               f"{len(notes)} note(s) waiting since {since}")
 
 
+class Backup(Behavior):
+    """Keep one latest snapshot of this config and its state files in a Basecamp Docs & Files folder.
+
+    "backup": {"project": <bucket id>, "vault": <Docs & Files folder id>} turns it on. Daily, and on demand
+    with `sync.py backup`, each backed-up file (BACKED_UP) whose content changed since its last upload is
+    uploaded: as a new version of its existing upload (`basecamp files replace`: same id, URL and name;
+    nobody is notified), or as a new upload when the folder has none of that name yet. backup.json keeps
+    each file's upload id and the digest last uploaded, so an unchanged file makes no call. A file that
+    holds a credential (a secret-looking config key, or a token-shaped value anywhere) is never uploaded:
+    it is logged and skipped. Nothing in the folder is ever deleted or trashed. A failed upload is logged
+    and retried on the next backup; it never fails the sync. A dry run logs only.
+    """
+    name, keys, every = "backup", ("backup",), DAY
+
+    def __init__(self, t, cfg):
+        super().__init__(t, cfg)
+        b = cfg.get("backup")
+        if b is None or b is False:
+            return
+        if not isinstance(b, dict) or set(b) != {"project", "vault"} or not all(str(b[k]).isdigit() for k in b):
+            raise ValueError('config "backup" must be {"project": <bucket id>, "vault": <Docs & Files folder id>}')
+        self.on, self.project, self.vault = True, str(b["project"]), str(b["vault"])
+
+    def run(self, items=None):
+        t = self.t
+        state = t.load("backup.json", {})
+        done = state.setdefault("files", {})
+        listed = None  # the folder's uploads by name, read once, only when a file has no upload yet
+        sent = same = 0
+        for name, data in t.local_files(BACKED_UP):
+            digest = hashlib.sha256(data).hexdigest()
+            rec = done.get(name) or {}
+            if rec.get("sha256") == digest and rec.get("upload"):
+                same += 1
+                continue
+            secret = holds_secret(name, data)
+            if secret:
+                t.log(f"backup: skipped {name}, it holds a credential ({secret}); it is never uploaded")
+                continue
+            if t.dry:
+                t.log(f"dry backup: upload {name} to folder {self.vault}"
+                      + (f" as a new version of upload {rec['upload']}" if rec.get("upload") else ""))
+                continue
+            try:
+                upload = rec.get("upload")
+                if upload:
+                    try:
+                        t.upload_replace(upload, t.path(name), self.project)
+                    except Exception as e:
+                        if getattr(e, "code", None) != "not_found":
+                            raise
+                        upload = None  # its upload is gone: find another of the name, else upload anew
+                if not upload:
+                    if listed is None:
+                        listed = {}
+                        for u in t.uploads_list(self.vault, self.project):
+                            listed.setdefault(u.get("filename") or u.get("title"), u.get("id"))
+                    upload = listed.get(name)
+                    if upload:
+                        t.upload_replace(upload, t.path(name), self.project)
+                    else:
+                        upload = t.upload_create(t.path(name), self.vault, self.project).get("id")
+            except Exception as e:
+                t.log(f"FAILED backup {name}, retrying on the next backup: {type(e).__name__}: {e}")
+                continue
+            done[name] = {"upload": upload, "sha256": digest, "at": now_iso()}
+            t.save_json("backup.json", state)
+            sent += 1
+        t.log(f"backup to folder {self.vault}: {sent} uploaded, {same} unchanged" + (" (dry run)" if t.dry else ""))
+
+
+# The files a backup uploads: the config and the JSON and JSONL state beside it; never a lock, a .tmp, sync.log,
+# a hand copy (config.json.bak-...) or backup.json itself, which changes with every backup.
+BACKED_UP = re.compile(r"(?!backup\.json$)[\w.-]+\.jsonl?")
+# A config key that names a credential, and a value shaped like a token (GitHub, Slack, OpenAI-style, bearer, PEM).
+SECRET_KEY = re.compile(r"(?i)(token|secret|passw(or)?d|api[_-]?key|credentials?|private[_-]?key|auth[_-]?header)")
+SECRET_VALUE = re.compile(r"\b(gh[opusr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|xox[abprs]-[\w-]{10,}|sk-[\w-]{20,})"
+                          r"|Bearer [\w.~+/-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----")
+
+
+def holds_secret(name, data):
+    """Why the file `name` with content `data` must not be uploaded (it holds a credential), or None.
+
+    Any file is refused for a token-shaped value; config.json, which should hold only ids and settings, also
+    for a key that names a credential. State files are not key-checked: their keys are task names and ids.
+    """
+    text = data.decode("utf-8", "replace")
+    m = SECRET_VALUE.search(text)
+    if m:
+        return "a token-shaped value"
+    if name == "config.json":
+        def keys(o):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    yield str(k)
+                    yield from keys(v)
+            elif isinstance(o, list):
+                for v in o:
+                    yield from keys(v)
+        try:
+            found = [k for k in keys(json.loads(text)) if SECRET_KEY.search(k)]
+        except ValueError:
+            return "it is not valid JSON, so it cannot be checked"
+        if found:
+            return f"key {found[0]!r}"
+    return None
+
+
 class Notifications(Behavior):
     """Read the agent login's Basecamp notifications and boosts every run, and run the reader for each thread that changed.
 
@@ -1094,7 +1202,7 @@ def stamp(r):
 # The timer runs the "on" behaviors that are due in this order: notifications first, so the owner's input is not held
 # up by the card mirror; inbox delivery after every reader, then the session alert, which watches what it delivered.
 ALL = (Notifications, CardMirror, ChatInbox, ChatAsks, ReleaseAnnouncements, SecurityAdvisories, CheckinAnswering, DecisionTodos,
-       AssignedTodos, AssignedCards, Reports, Pings, InboxDelivery, SessionAlert)
+       AssignedTodos, AssignedCards, Reports, Pings, InboxDelivery, SessionAlert, Backup)
 # The readers notifications take over: with notifications on they run as the hourly repair sweep.
 # assigned-todos keeps its 5-minute sweep: a request's edits and the owner's boosts on it reach no notification.
 SWEPT = ("chat-inbox", "decision-todos", "reports", "pings")
