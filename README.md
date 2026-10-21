@@ -488,11 +488,14 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   it is readable again; any other failed read is logged and retried next run. The sync
   never changes, publishes or comments on an advisory. The same run lists each repository's
   open Dependabot alerts (`gh api repos/<owner>/<name>/dependabot/alerts?state=open`, the
-  newest 100) and records one `dependabot-alert` record (number, package, ecosystem,
-  severity, fixed-in version, manifest, summary, link) per alert the first time it is open;
+  newest 100). The first read of a repository is a baseline: one `dependabot-baseline` record
+  (open count by severity, link to its Dependabot page) and the alerts already open are
+  marked seen. After that, one `dependabot-alert` record (number, package, ecosystem,
+  severity, fixed-in version, manifest, summary, link) is recorded per alert that opens;
   `advisories.json` keeps which alerts are open, so an alert that is fixed or dismissed and
   later reopens is recorded again, marked `reopened`. A repository whose alerts cannot be
-  read (HTTP 403 or 404: alerts off, or the login lacks access) is recorded once as
+  read (HTTP 403 or 404, or a `gh` error asking for a missing token scope: alerts off, or
+  the login lacks access) is recorded once as
   `dependabot-unreadable`. Alerts are never dismissed or changed. Code-scanning alerts and
   the global advisory database are not read.
 - Chat questions: for each chat id in the optional `chats` config list, each run reads the

@@ -256,8 +256,9 @@ that read.
   decisions to the captain (a decision to-do, see "Decisions as to-dos"). Never change an advisory's state,
   publish it, request a CVE or comment on it without the captain's word, and keep its
   details out of public places (issues, PRs, chats others read) until it is published.
-- `dependabot-alert`, `dependabot-unreadable` (`advisories` config, same repos): an open
-  Dependabot alert seen for the first time or reopened (`package`, `severity`, `fixed_in`,
+- `dependabot-baseline`, `dependabot-alert`, `dependabot-unreadable` (`advisories` config,
+  same repos): the first read of a repo's alerts as one summary (open count by severity; file
+  one to-do for that backlog if any are open), then each Dependabot alert that opens or reopens after it (`package`, `severity`, `fixed_in`,
   `manifest`, `summary`, link), or a repository whose alerts this login cannot read
   (reported once). File a to-do for the alert and route the fix the same day to whoever owns
   the repository, through the normal PR flow; bring a dismissal or a fix that cannot be
