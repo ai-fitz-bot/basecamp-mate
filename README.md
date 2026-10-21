@@ -846,6 +846,10 @@ or by hand from
   turns on the to-do comment reader.
 - `message_board` (optional): the message board id `sync.py post-message` posts on; the
   owner's boosts on the agent's messages there are relayed.
+- `timezone` (optional): an IANA zone name (like `America/Chicago`) for the times the sync
+  writes for people: records' `at_local`, inbox notes and the session alert. Unset, the
+  captain's Basecamp time zone (their profile's `time_zone`) is used, and UTC when that
+  can't be read.
 - `inbox` (optional): `{}` or `{"fm_home": "<firstmate home>"}`: deliver each new pending
   record as a note in that home's inbox (default: the `--home`).
 - `session_alert` (optional, needs `inbox`): `{"chat": <chat id>, "after_minutes": 15}`: post
@@ -1056,6 +1060,12 @@ carries the question's writer the same way. A record written before the `people`
 none of them and is the captain's; one written before operators has no `role`. Only a
 record whose `role` is `captain` or `operator` (without `role`: `captain` true) can be a
 decision or an approval.
+
+Times stay as Basecamp or GitHub wrote them (`at`, `created_at`); a record with a readable
+time also carries it in the people's local time as `at_local` or `created_at_local`, like
+`2026-10-21 09:14 CDT`. Quote the local one when telling a person a time. The zone is the
+config `timezone`, else the captain's Basecamp time zone, else UTC. Logs and state files
+stay in UTC.
 
 - `comment`: `task`, `repo`, `card`, `comment` (id), `at`, `text`.
 - `question`: the same fields as `comment`, for a comment containing `?`.

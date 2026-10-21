@@ -438,6 +438,63 @@ class TodoBoosts(ToolBase):
         self.assertEqual([r["boost"] for r in self.pending() if r["key"] == "old"], [92])
 
 
+class ZoneStub(TodoStub):
+    """Answers the captain's person record with a Basecamp time zone, or fails it."""
+
+    def __init__(self, zone="America/Chicago", fail=False):
+        super().__init__()
+        self.zone, self.fail = zone, fail
+
+    def __call__(self, cmd, **kw):
+        if cmd[0] == "basecamp" and "/people/" in " ".join(cmd):
+            self.calls.append(cmd[3:-3])
+            if self.fail:
+                return SimpleNamespace(stdout=json.dumps({"ok": False, "error": "boom"}), stderr="", returncode=1)
+            return SimpleNamespace(stdout=json.dumps({"ok": True, "data": {"id": CAPTAIN, "time_zone": self.zone}}),
+                                   stderr="", returncode=0)
+        return super().__call__(cmd, **kw)
+
+
+class TimeZone(ToolBase):
+    def people_calls(self):
+        return [c for c in self.stub.calls if "/people/" in " ".join(c)]
+
+    def test_record_times_are_also_written_in_the_captains_basecamp_zone(self):
+        self.stub = ZoneStub()
+        s = self.sync()
+        s.record({"kind": "comment", "at": "2026-10-21T14:14:00Z", "due_on": "2026-10-22"})
+        s.record({"kind": "advisory", "created_at": "2026-01-05T14:14:00.000-05:00"})
+        a, b = self.pending()
+        self.assertEqual(a["at"], "2026-10-21T14:14:00Z")  # the machine time stays UTC as read
+        self.assertEqual(a["at_local"], "2026-10-21 09:14 CDT")
+        self.assertNotIn("due_on_local", a)
+        self.assertEqual(b["created_at_local"], "2026-01-05 13:14 CST")
+        self.assertEqual(len(self.people_calls()), 1)  # read once a run
+
+    def test_config_timezone_overrides_the_basecamp_zone(self):
+        self.stub = ZoneStub()
+        self.cfg(timezone="Europe/London")
+        s = self.sync()
+        self.assertEqual(s.local_time("2026-10-21T14:14:00Z"), "2026-10-21 15:14 BST")
+        self.assertEqual(self.people_calls(), [])
+
+    def test_unreadable_zone_falls_back_to_utc_without_failing_the_run(self):
+        for stub in (ZoneStub(fail=True), ZoneStub(zone=None), ZoneStub(zone="Central Time (US & Canada)")):
+            self.stub = stub
+            s = self.sync()
+            self.assertEqual(s.local_time("2026-10-21T14:14:00Z"), "2026-10-21 14:14 UTC")
+            self.assertEqual(s.errors, 0)
+
+    def test_unreadable_time_is_left_as_is(self):
+        self.stub = ZoneStub()
+        self.assertEqual(self.sync().local_time("t0"), "t0")
+
+    def test_config_timezone_must_be_an_iana_name(self):
+        self.cfg(timezone="Not/AZone")
+        with self.assertRaisesRegex(ValueError, "timezone"):
+            self.sync()
+
+
 class Inbox(ToolBase):
     def setUp(self):
         super().setUp()

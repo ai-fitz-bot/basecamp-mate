@@ -509,7 +509,8 @@ class Unmonitored(NotifBase):
                                "recording_type": "Chat::Lines", "notification": 10, "recording": 78, "title": "Chat",
                                "text": "tighten the intro", "creator": {"id": CAPTAIN, "name": "Cap"},
                                "author": {"id": CAPTAIN, "name": "Cap"}, "captain": True, "role": "captain",
-                               "url": f"{APP}/buckets/{PROJECT}/chats/78", "at": "2099-01-01T00:00:01Z"})
+                               "url": f"{APP}/buckets/{PROJECT}/chats/78", "at": "2099-01-01T00:00:01Z",
+                               "at_local": "2099-01-01 00:00 UTC"})
         [(rid, body, *_)] = self.stub.notes
         self.assertEqual(rid, "basecamp-unmonitored-chat.line.created-Chat::Lines-10")
         self.assertIn("nothing monitors: chat.line.created on Chat::Lines 'Chat'", body)

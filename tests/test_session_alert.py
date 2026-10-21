@@ -57,6 +57,7 @@ class SessionAlert(Base):
         self.assertEqual(posts[0][0], CHAT)
         self.assertIn("sgid-owner", posts[0][1])
         self.assertIn("2 Basecamp messages have been waiting", posts[0][1])
+        self.assertRegex(posts[0][1], r"since \d{4}-\d\d-\d\d \d\d:\d\d UTC\.")  # the captain's zone; the stub has none
         self.assertTrue(self.state()["alerted"])
         self.assertIn("session alert: posted line", self.log())
 

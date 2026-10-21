@@ -88,6 +88,14 @@ class Tools:
         self.card_scope = (cfg.get("assigned_cards") or {}).get("scope", "project") \
             if isinstance(cfg.get("assigned_cards"), dict) else "project"
         self.message_board = str(cfg["message_board"]) if cfg.get("message_board") is not None else None
+        # "timezone": the IANA zone times written for people are shown in; unset, the captain's Basecamp time zone.
+        self.timezone = cfg.get("timezone")
+        if self.timezone is not None:
+            try:
+                ZoneInfo(str(self.timezone))
+            except (ValueError, KeyError):
+                raise ValueError('config "timezone" must be an IANA time zone name, like "America/Chicago"')
+        self._zone = None  # the resolved zone, once a run
         self.dry, self.run = dry, runner
         self._acting = False  # acting person id once resolved; None when it can't be
         self._acting_sgid = None  # the acting person's mention sgid, to spot @mentions in chat
@@ -140,8 +148,33 @@ class Tools:
         with open(p) as f:
             return f.read().splitlines()
 
+    def zone(self):
+        """The zone times written for people are shown in: config "timezone", else the captain's Basecamp time zone, else UTC."""
+        if self._zone is None:
+            name = self.timezone
+            if name is None:
+                try:
+                    name = (self.bc("api", "get", f"/people/{self.captain}.json") or {}).get("time_zone")
+                except Exception as e:
+                    self.errors -= isinstance(e, BasecampError)  # a missing zone is no failed reader
+                    self.log(f"time zone: could not read person {self.captain}, using UTC: {type(e).__name__}: {e}")
+            try:
+                self._zone = ZoneInfo(str(name)) if name else timezone.utc
+            except (ValueError, KeyError):
+                self.log(f"time zone: {name!r} is not an IANA zone, using UTC")
+                self._zone = timezone.utc
+        return self._zone
+
+    def local_time(self, at):
+        """ISO time `at` (or a datetime) in the people's zone, like "2026-10-21 09:14 CDT"; `at` as is when unreadable."""
+        when = local_time(at, self.zone())
+        return when if when is not None else at
+
     def record(self, rec):
-        """Append one pending record for the agent."""
+        """Append one pending record for the agent, with its times also in the people's zone ("at_local", ...)."""
+        for k in ("at", "created_at"):
+            if rec.get(k) and local_time(rec[k], timezone.utc) is not None:
+                rec = {**rec, k + "_local": self.local_time(rec[k])}
         with open(self.path("pending-comments.jsonl"), "a") as f:
             f.write(json.dumps(rec) + "\n")
 
@@ -1940,6 +1973,19 @@ def parse_reading(r):
     p = re.search(r"basecamp\.com/\d+/(?:buckets/\d+/(?:card_tables/)?)?([a-z_]+)", r.get("app_url") or "")
     return {"bucket": m.group(1) if m else None, "thread": int(m.group(2)) if m else None,
             "anchor": int(a.group(1)) if a else None, "path": p.group(1) if p else None}
+
+
+def local_time(at, zone):
+    """ISO time `at` (or a datetime; UTC when naive) in `zone`, like "2026-10-21 09:14 CDT"; None when unreadable."""
+    if not isinstance(at, datetime) and "T" not in str(at):
+        return None  # a bare date has no time of day to move
+    try:
+        when = at if isinstance(at, datetime) else datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(zone).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def now_iso():
