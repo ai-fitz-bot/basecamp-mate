@@ -330,7 +330,8 @@ class SecurityAdvisories(Behavior):
     recorded once (kind "advisory") and again only when it leaves triage or draft for published or closed (kind
     "advisory-update"). A repo the login cannot read advisories for (HTTP 403 or 404) is recorded once as
     "advisory-unreadable" and stays quiet until it is readable again; any other failed read is logged and retried next
-    run. Nothing on GitHub is ever changed. A dry run reads and logs only.
+    run. The same repos' open Dependabot alerts are read on the same cadence (see dependabot). Nothing on GitHub is
+    ever changed. A dry run reads and logs only.
     """
     name, keys, every = "security-advisories", ("advisories",), SWEEP
 
@@ -388,6 +389,54 @@ class SecurityAdvisories(Behavior):
                 state["seen"][key] = now
                 t.save_json("advisories.json", state)
                 t.log(f"advisories {repo}: recorded {kind} {ghsa} ({now})")
+            self.dependabot(state, repo)
+
+    def dependabot(self, state, repo):
+        """Record each open Dependabot alert of repo once (kind "dependabot-alert"), and again if it reopens after
+        leaving the open list (fixed or dismissed). A repo whose alerts cannot be read (HTTP 403 or 404, such as
+        alerts turned off) is recorded once as "dependabot-unreadable"."""
+        t = self.t
+        seen, unreadable = state.setdefault("alerts", {}), state.setdefault("alerts_unreadable", {})
+        try:
+            listed = t.gh("api", f"repos/{repo}/dependabot/alerts?state=open&per_page=100")
+        except Exception as e:
+            denied = re.search(r"HTTP (403|404)", str(e))
+            if not denied:
+                t.log(f"dependabot {repo}: {type(e).__name__}: {e}")
+            elif repo not in unreadable:
+                t.log(f"dependabot {repo}: cannot read its Dependabot alerts (HTTP {denied.group(1)}); reported once")
+                if not t.dry:
+                    unreadable[repo] = denied.group(1)
+                    t.record({"kind": "dependabot-unreadable", "repo": repo, "status": denied.group(1),
+                              "url": f"https://github.com/{repo}/security/dependabot"})
+                    t.save_json("advisories.json", state)
+            return
+        if t.dry:
+            for a in listed:
+                if seen.get(f"{repo}#{a.get('number')}") != "open":
+                    t.log(f"dry dependabot {repo}: would record alert {a.get('number')}")
+            return
+        unreadable.pop(repo, None)
+        open_now = {f"{repo}#{a.get('number')}" for a in listed}
+        for key in [k for k, v in seen.items() if k.startswith(f"{repo}#") and v == "open" and k not in open_now]:
+            seen[key] = "closed"  # fixed or dismissed: a later reopen is recorded again
+        for a in sorted(listed, key=lambda a: a.get("number") or 0):
+            key = f"{repo}#{a.get('number')}"
+            before = seen.get(key)
+            if before == "open":
+                continue
+            adv, vuln = a.get("security_advisory") or {}, a.get("security_vulnerability") or {}
+            t.record({"kind": "dependabot-alert", "repo": repo, "number": a.get("number"),
+                      "severity": vuln.get("severity") or adv.get("severity"),
+                      "package": (vuln.get("package") or {}).get("name"),
+                      "ecosystem": (vuln.get("package") or {}).get("ecosystem"),
+                      "fixed_in": (vuln.get("first_patched_version") or {}).get("identifier"),
+                      "manifest": (a.get("dependency") or {}).get("manifest_path"),
+                      "summary": adv.get("summary"), "ghsa": adv.get("ghsa_id"), "reopened": before is not None,
+                      "created_at": a.get("created_at"), "url": a.get("html_url")})
+            seen[key] = "open"
+            t.log(f"dependabot {repo}: recorded alert {a.get('number')}")
+        t.save_json("advisories.json", state)
 
 
 class CheckinAnswering(Behavior):
@@ -1170,6 +1219,25 @@ def inbox_note(rec, account, project):
                   "publish it or comment on it without the captain's word, and keep its details out of public places"
                   if kind == "advisory" else
                   "record the outcome in the backlog and close any work on it that is now done; change nothing on GitHub")
+        url = rec.get("url")
+    elif kind == "dependabot-alert":
+        rid = f"{rec.get('repo')}-{rec.get('number')}" + ("-reopened" if rec.get("reopened") else "")
+        what = (f"GitHub Dependabot alert {rec.get('number')} on {rec.get('repo')}"
+                + (" reopened" if rec.get("reopened") else "")
+                + f", severity {rec.get('severity') or 'unknown'}: {rec.get('package') or 'a dependency'}"
+                + (f" ({rec.get('manifest')})" if rec.get("manifest") else "")
+                + (f", fixed in {rec['fixed_in']}" if rec.get("fixed_in") else ", no fixed version yet"))
+        text = text or str(rec.get("summary") or "")
+        handle = ("file a to-do for it and route the fix today to whoever owns the repository (the dependency upgrade "
+                  "goes through the normal PR flow); bring a dismissal or a fix you cannot make to the captain as a "
+                  "decision to-do; never dismiss the alert or change it on GitHub yourself")
+        url = rec.get("url")
+    elif kind == "dependabot-unreadable":
+        rid = rec.get("repo")
+        what = (f"GitHub Dependabot alerts on {rec.get('repo')} cannot be read by this login (HTTP {rec.get('status')}); "
+                "reported once")
+        handle = ("tell the captain: Dependabot alerts may be off for the repository, or the login needs admin or "
+                  "security-manager access")
         url = rec.get("url")
     elif kind == "advisory-unreadable":
         rid = rec.get("repo")

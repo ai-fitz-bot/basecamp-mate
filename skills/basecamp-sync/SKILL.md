@@ -256,6 +256,12 @@ that read.
   decisions to the captain (a decision to-do, see "Decisions as to-dos"). Never change an advisory's state,
   publish it, request a CVE or comment on it without the captain's word, and keep its
   details out of public places (issues, PRs, chats others read) until it is published.
+- `dependabot-alert`, `dependabot-unreadable` (`advisories` config, same repos): an open
+  Dependabot alert seen for the first time or reopened (`package`, `severity`, `fixed_in`,
+  `manifest`, `summary`, link), or a repository whose alerts this login cannot read
+  (reported once). File a to-do for the alert and route the fix the same day to whoever owns
+  the repository, through the normal PR flow; bring a dismissal or a fix that cannot be
+  made to the captain as a decision to-do. Never dismiss or change the alert on GitHub.
 - `checkin`: a check-in question came due today. Work out the answer within this home's
   scope and post it once with
   `python3 $SYNC/sync.py answer --home <home> --config <home>/data/basecamp-sync/config.json --question <question id> --body-file <file>`.
