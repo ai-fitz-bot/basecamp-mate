@@ -83,6 +83,10 @@ class Tools:
         # "account": to-dos assigned to the acting user in any project of the account are requests; else this project's.
         self.assigned_scope = (cfg.get("assigned_todos") or {}).get("scope", "project") \
             if isinstance(cfg.get("assigned_todos"), dict) else "project"
+        # "assigned_cards": cards assigned to the acting user are requests too, read like to-do requests, with their own scope.
+        self.assigned_cards = cfg.get("assigned_cards") not in (None, False)
+        self.card_scope = (cfg.get("assigned_cards") or {}).get("scope", "project") \
+            if isinstance(cfg.get("assigned_cards"), dict) else "project"
         self.message_board = str(cfg["message_board"]) if cfg.get("message_board") is not None else None
         self.dry, self.run = dry, runner
         self._acting = False  # acting person id once resolved; None when it can't be
@@ -1000,28 +1004,39 @@ class Tools:
 
     # --- to-do requests: to-dos the people listened to assign to the acting user ---
 
-    def todo(self, tid, bucket=None):
+    def todo(self, tid, bucket=None, card=False):
         """To-do `tid` in `bucket` (default the project), refetched: content (its name), description, assignees, creator,
-        completed, completion, status, due_on, repetition_schedule, its parent (list) and the bucket (project) it is in."""
+        completed, completion, status, due_on, repetition_schedule, its parent (list) and the bucket (project) it is in.
+        `card`: card `tid` instead, in the same shape (its title as content, its content as description)."""
+        if card:
+            c = self.bc("api", "get", f"/buckets/{bucket or self.project}/card_tables/cards/{tid}.json", project=bucket) or {}
+            return dict(c, content=c.get("title"), description=c.get("content"))
         return self.bc("api", "get", f"/buckets/{bucket or self.project}/todos/{tid}.json", project=bucket) or {}
 
-    def assigned_todo_buckets(self):
-        """{to-do id: its bucket id} for the open to-dos assigned to the acting user, from one read of /my/assignments.json:
-        in this project, or in every project of the account when the scope is "account"."""
+    def assigned_todo_buckets(self, card=False):
+        """{to-do id: its bucket id} for the open to-dos (or, with `card`, cards) assigned to the acting user, from one
+        read of /my/assignments.json: in this project, or in every project of the account when the scope is "account"."""
         data = self.bc("api", "get", "/my/assignments.json") or {}
         items = data if isinstance(data, list) else (data.get("priorities") or []) + (data.get("non_priorities") or [])
+        kind, scope = ("card", self.card_scope) if card else ("todo", self.assigned_scope)
         found = {}
         for a in items:
             bucket = str((a.get("bucket") or {}).get("id") or self.project)
-            if (a.get("id") and not a.get("completed") and (a.get("type") or "todo").lower() == "todo"
-                    and (self.assigned_scope == "account" or bucket == self.project)):
+            if (a.get("id") and not a.get("completed") and (a.get("type") or "todo").lower() == kind
+                    and (scope == "account" or bucket == self.project)):
                 found.setdefault(a["id"], bucket)
         return found
 
-    def request_keys(self):
-        """The keys of the open to-do requests in todos.json."""
+    def request_keys(self, cards=None):
+        """The keys of the open to-do requests in todos.json; `cards` True only the card requests, False only the to-dos'."""
         return sorted(k for k, r in self.load("todos.json", {}).items()
-                      if r.get("request") and not r.get("completed") and not r.get("closed"))
+                      if r.get("request") and not r.get("completed") and not r.get("closed")
+                      and (cards is None or (r.get("type") == "card") == cards))
+
+    def mirrored_card(self, cid, bucket=None):
+        """True when card `cid` is one the card mirror made from the backlog (map.json), never a request."""
+        return (str(bucket or self.project) == self.project
+                and any(r.get("card") == cid for r in self.load("map.json", {}).values()))
 
     def previous_occurrence(self, tid, todo, bucket=None):
         """The completed request that repeating to-do `tid` is the next occurrence of, as (key, its todos.json entry).
@@ -1063,7 +1078,7 @@ class Tools:
         _, _, key, rec = max(found, key=lambda f: f[:2])
         return key, rec
 
-    def read_todo_request(self, tid, by=None, bucket=None):
+    def read_todo_request(self, tid, by=None, bucket=None, card=False):
         """Record to-do `tid` as a `todo-request` once, when it is open, assigned to the acting user, and `by` is listened to.
 
         `by` is who assigned it (an event's creator id); None means its creator, as the
@@ -1080,14 +1095,19 @@ class Tools:
         open request already tracked, a to-do assigned to someone else, or one not
         assigned by someone listened to (the sweep remembers those in
         assigned-todos.json, so it fetches each once). A dry run records nothing.
+
+        `card`: `tid` is a card (assigned_cards), recorded as a `card-request` and kept with
+        "type": "card"; a card the card mirror made from the backlog is never a request.
         """
         me = self.agent()
         key = f"request-{tid}"
         rec = self.load("todos.json", {}).get(key)
         if me is None or (rec is not None and not rec.get("completed") and not rec.get("closed")):
             return False
+        if card and self.mirrored_card(tid, bucket):
+            return False
         try:
-            todo = self.todo(tid, bucket)
+            todo = self.todo(tid, bucket, card)
         except RuntimeError as e:
             self.log(f"todo request {tid}: {e}")
             return False
@@ -1119,11 +1139,13 @@ class Tools:
                        request=self.author(who), bucket=int(bucket or self.project),
                        project_name=(todo.get("bucket") or {}).get("name") or rec.get("project_name"),
                        parent=(todo.get("parent") or {}).get("id"), **todo_schedule(todo))
+            if card:
+                rec["type"] = "card"
             if prev_key is not None and prev_key != key:
                 state[prev_key]["next"] = tid
             if [tid, EYES] not in [a[:2] for a in rec.get("acked", [])] + rec.get("ack", []):
                 rec.setdefault("ack", []).append([tid, EYES])
-            self.record({"kind": "todo-request", "key": key, "todo": tid, "n": n, "reopened": n > 1 and prev is None,
+            self.record({"kind": "card-request" if card else "todo-request", "key": key, "todo": tid, "n": n, "reopened": n > 1 and prev is None,
                          "follows": prev["todo"] if prev else None, **todo_schedule(todo),
                          "title": todo.get("content"), "text": plain(todo.get("description")),
                          "assignees": [a.get("name") for a in todo.get("assignees") or []],
@@ -1135,26 +1157,27 @@ class Tools:
             self.save_json("todos.json", state)
         return True
 
-    def discover_todo_requests(self, limit=10):
+    def discover_todo_requests(self, limit=10, cards=False):
         """The sweep: run read_todo_request for each open to-do assigned to the acting user that is not yet an open request.
 
         Only this project's to-dos, unless the scope is "account": then every project's.
         At most `limit` to-dos are fetched a run; one already found not to be assigned by
         someone listened to is never fetched again. Refused (logged) unless the acting
         user is someone other than the owner: /my/assignments.json is the acting user's.
+        `cards`: the cards assigned to the acting user instead (assigned_cards).
         """
         if self.agent() is None:
             self.log("todo requests: the acting user is the owner, unset or unknown; assigned to-dos not read")
             return
         try:
-            found = self.assigned_todo_buckets()
+            found = self.assigned_todo_buckets(cards)
         except RuntimeError as e:
             self.log(f"todo requests: {e}")
             return
         tracked = {self.load("todos.json", {})[k]["todo"] for k in self.request_keys()}
         ignored = set(self.load("assigned-todos.json", {}).get("ignored", []))
         for tid in [i for i in found if i not in tracked and i not in ignored][:limit]:
-            self.read_todo_request(tid, bucket=found[tid])
+            self.read_todo_request(tid, bucket=found[tid], card=cards)
 
     def refresh_todo_request(self, key, by=None):
         """Record what changed on open to-do request `key` since it was last read: an edit, or its closing.
@@ -1166,13 +1189,14 @@ class Tools:
         Its name or description changed, or (for one tracked with its schedule) its due date
         or repetition rule: a `todo-request-update` record with the new text and schedule.
         `by` is who did it, when an event says; otherwise Basecamp does not say who edited it. A dry run records nothing. Returns the record kind, or None.
+        A card request's records are `card-request-closed` and `card-request-update`.
         """
         me = self.agent()
         rec = self.load("todos.json", {}).get(key)
         if me is None or rec is None or not rec.get("request") or rec.get("completed") or rec.get("closed"):
             return None
         try:
-            todo = self.todo(rec["todo"], rec.get("bucket"))
+            todo = self.todo(rec["todo"], rec.get("bucket"), rec.get("type") == "card")
         except RuntimeError as e:
             self.log(f"todo request {key}: {e}")
             return None
@@ -1196,7 +1220,7 @@ class Tools:
                     state[key].update(todo_schedule(todo), parent=(todo.get("parent") or {}).get("id"))
                     self.save_json("todos.json", state)
             return None
-        kind = "todo-request-closed" if reason else "todo-request-update"
+        kind = ("card" if rec.get("type") == "card" else "todo") + ("-request-closed" if reason else "-request-update")
         if self.dry:
             self.log(f"dry todo request {key}: {kind}" + (f" ({reason})" if reason else ""))
             return None
@@ -1595,8 +1619,9 @@ class Tools:
         return True
 
     def need_todos(self, requests=True):
-        """Refuse a to-do command the config does not allow: "todos" for any, or "assigned_todos" for a tracked to-do request."""
-        if self.todos is None and not (requests and self.assigned_todos):
+        """Refuse a to-do command the config does not allow: "todos" for any, or "assigned_todos" (or "assigned_cards")
+        for a tracked request."""
+        if self.todos is None and not (requests and (self.assigned_todos or self.assigned_cards)):
             raise RuntimeError('config has no "todos"' + (' or "assigned_todos"' if requests else ""))
 
     def todo_create(self, key, title, description="", todolist=None, due=None, subtasks=()):
@@ -1708,7 +1733,8 @@ class Tools:
         return True
 
     def todo_complete(self, ref):
-        """Mark a tracked to-do complete; its comments are no longer read."""
+        """Mark a tracked to-do complete; its comments are no longer read. A card request is completed the same way,
+        which Basecamp shows by moving the card to its table's Done column."""
         self.need_todos()
         key, rec = self.tracked(ref)
         if rec.get("completed"):
@@ -1722,7 +1748,11 @@ class Tools:
         if self.dry:
             self.log(f"dry todo complete {key}: complete todo {rec['todo']}")
             return False
-        self.bc("todos", "complete", str(rec["todo"]), project=rec.get("bucket"))
+        if rec.get("type") == "card":
+            self.bc("api", "post", f"/buckets/{rec.get('bucket') or self.project}/todos/{rec['todo']}/completion.json",
+                    project=rec.get("bucket"))
+        else:
+            self.bc("todos", "complete", str(rec["todo"]), project=rec.get("bucket"))
         with self.locked("todos.json"):
             state = self.load("todos.json", {})
             state[key]["completed"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1764,7 +1794,7 @@ class Tools:
         due date and repetition rule. Basecamp alone owns a to-do's schedule, so a date read earlier may have moved."""
         self.need_todos()
         key, rec = self.tracked(ref)
-        todo = self.todo(rec["todo"], rec.get("bucket"))
+        todo = self.todo(rec["todo"], rec.get("bucket"), rec.get("type") == "card")
         me = self.agent()
         out(json.dumps({"key": key, "todo": rec["todo"], "title": todo.get("content"), "text": plain(todo.get("description")),
                         "open": not todo.get("completed") and todo.get("status") in (None, "active"),
@@ -1817,7 +1847,8 @@ class Tools:
 
 def request_fields(rec):
     """The fields that mark a record as part of a to-do request: its title and project, for a to-do request's record; none otherwise."""
-    return {"request": True, "title": rec.get("title"), "project": request_project(rec)} if rec.get("request") else {}
+    return {"request": True, "title": rec.get("title"), "project": request_project(rec),
+            **({"type": "card"} if rec.get("type") == "card" else {})} if rec.get("request") else {}
 
 
 def request_project(rec):

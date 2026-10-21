@@ -113,6 +113,8 @@ still fires on a FAILED line in `sync.log`. By `kind`:
 - `todo-request`: a to-do assigned to you, by `author`. A request; see "To-do requests" below.
 - `todo-request-update`, `todo-request-closed`: a to-do request was edited (adjust the work
   to the new text, due date or repetition) or closed (below).
+- `card-request`, `card-request-update`, `card-request-closed`: the same for a card assigned
+  to you; see "Card requests" below.
 - `chat-question`: a line the captain posted in chat. With `every_line` on, that is every line, not
   only questions; with `mention: true` it @mentions you (or replies to your line) in a chat
   you otherwise do not relay. Treat it as an instruction or question from them, do what it asks, and
@@ -199,6 +201,14 @@ you did in a `todo comment` with the full links, then close it yourself with
 closed for you (`reason` completed, unassigned, trashed or archived): stop the work, note
 it in the backlog, and do not complete it. To-dos assigned to anyone else are not yours;
 ignore them.
+
+**Card requests.** With `assigned_cards` on, a card someone you listen to assigns to you
+is a request handled exactly like a to-do request: it arrives as a `card-request`, its
+edits and closing as `card-request-update` and `card-request-closed`, and its comments and
+boosts as `todo-comment` and `boost` with `request: true` and `type: "card"`. Use the same
+commands with its key (`request-<card id>`): `reply`, `todo comment`, `todo show`, and
+`todo complete` when the work is done, which completes the card and moves it to its
+table's Done column. Cards the sync mirrors from your backlog are never requests.
 
 **Scheduled to-dos.** A request with a `due_on` is scheduled: do it on that date, not
 before when its description says so, and leave it open until then (put it in your backlog

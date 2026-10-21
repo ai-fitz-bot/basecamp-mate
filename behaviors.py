@@ -509,30 +509,48 @@ class AssignedTodos(Behavior):
     request's edits and the owner's boosts on it, which reach no notification.
     """
     name, keys, every = "assigned-todos", ("assigned_todos",), SLOW
+    things = "to-dos"
 
     def __init__(self, t, cfg):
         super().__init__(t, cfg)
-        opts = cfg.get("assigned_todos")
+        key = self.keys[0]
+        opts = cfg.get(key)
         if opts is not None and not isinstance(opts, (bool, dict)):
-            raise ValueError('config "assigned_todos" must be {} or {"limit": <newly assigned to-dos read per sweep>, '
+            raise ValueError(f'config "{key}" must be {{}} or {{"limit": <newly assigned {self.things} read per sweep>, '
                              '"scope": "project" | "account"}')
         self.on = opts is not None and opts is not False
         opts = opts if isinstance(opts, dict) else {}
         self.limit = int(opts.get("limit", 10))
         if self.limit < 1:
-            raise ValueError('config "assigned_todos" "limit" must be at least 1')
+            raise ValueError(f'config "{key}" "limit" must be at least 1')
         self.scope = opts.get("scope", "project")
         if self.scope not in ("project", "account"):
-            raise ValueError('config "assigned_todos" "scope" must be "project" (the default) or "account"')
+            raise ValueError(f'config "{key}" "scope" must be "project" (the default) or "account"')
         self.account_wide = self.on and self.scope == "account"
 
     def run(self, items=None):
         """The sweep: new requests, then the open ones' comments and boosts, then their edits and closing."""
-        t = self.t
-        t.discover_todo_requests(self.limit)
-        t.read_todo_comments(requests=True)
-        for key in t.request_keys():
+        t, cards = self.t, self.name == "assigned-cards"
+        t.discover_todo_requests(self.limit, cards)
+        t.read_todo_comments(keys=t.request_keys(cards), requests=True)
+        for key in t.request_keys(cards):
             t.refresh_todo_request(key)
+
+
+class AssignedCards(AssignedTodos):
+    """Cards the listened-to people assign to the agent's login, as requests, read like to-do requests: recorded once as
+    a `card-request`, acknowledged with 👀 and tracked in todos.json ("type": "card"), so their comments, boosts, edits
+    and closing arrive as records of the request; the agent comments with `sync.py todo comment` and completes each with
+    `sync.py todo complete`, which Basecamp shows by moving the card to Done. A card the card mirror made from the
+    backlog is never a request.
+
+    "assigned_cards": {} turns it on, with the same "limit" and "scope" as "assigned_todos".
+    Notifications see the assignment (an "Event" on the card), comments and completion
+    first; the timer's sweep every 5 minutes is the repair sweep and the only reader of a
+    request's edits and boosts.
+    """
+    name, keys, every = "assigned-cards", ("assigned_cards",), SLOW
+    things = "cards"
 
 
 class Reports(Behavior):
@@ -887,6 +905,8 @@ class Notifications(Behavior):
                 done = t.refresh_todo_request(key, by)
             elif kind == "todo.assignment_changed":
                 done = "todo-request" if t.read_todo_request(tid, by, bucket) else None
+            elif kind == "card":  # any event on a card: a request when it is now assigned to the agent
+                done = "card-request" if t.read_todo_request(tid, by, bucket, card=True) else None
             else:
                 done = None
             ran.append(f"request {tid}" + (f" -> {done}" if done else ""))
@@ -912,6 +932,16 @@ class Notifications(Behavior):
             want["pings"][str(thread)] = conv
             return True, [f"ping {thread}"], None
         here, todos = bucket == t.project, t.load("todos.json", {})
+        cards = b["assigned-cards"]
+        if path == "cards" and kind not in ("Comment", "Mention") and (
+                f"request-{thread}" in t.request_keys(cards=True)
+                or cards.on and (here or cards.account_wide) and not t.mirrored_card(thread, bucket)):
+            # An event on a card (assigned, completed, moved, edited): a new request, or its request's edit or closing;
+            # one that is neither stays unmonitored, as before.
+            want["requests"].setdefault(thread, ("card", who.get("id"), None if here else bucket))
+            check = self.check(kind, None, thread, r) if here and t.hears(who, admitted=False) else None
+            return True, [f"request {thread}"], check and (
+                lambda: None if f"request-{thread}" in t.load("todos.json", {}) else check())
         if kind in ("Assignment", "Completion"):  # thread and anchor are the to-do
             what = "todo.assignment_changed" if kind == "Assignment" else "todo.completed"
             tracked = f"request-{thread}" in t.request_keys()
@@ -924,7 +954,7 @@ class Notifications(Behavior):
                 return True, [], None  # a decision to-do's own closing, or not from someone listened to
             return True, [], self.check(what, "Todo", thread, r)
         if not here:
-            keys = {k for k, rec in todos.items() if rec.get("request") and rec.get("todo") == thread and path == "todos"
+            keys = {k for k, rec in todos.items() if rec.get("request") and rec.get("todo") == thread and path in ("todos", "cards")
                     and str(rec.get("bucket")) == bucket and not rec.get("completed") and not rec.get("closed")}
             if keys and kind in ("Comment", "Mention"):
                 want["todos"] |= keys
@@ -947,10 +977,11 @@ class Notifications(Behavior):
             if keys:
                 want["cards"] |= keys
                 return True, ["cards"], None
-        if path == "todos":
+        if path in ("todos", "cards"):
             mine = {k: rec for k, rec in todos.items() if rec.get("todo") == thread}
             keys = {k for k, rec in mine.items() if not rec.get("completed") and not rec.get("closed")
-                    and b["assigned-todos" if rec.get("request") else "decision-todos"].on}
+                    and b["assigned-cards" if rec.get("type") == "card" else
+                          "assigned-todos" if rec.get("request") else "decision-todos"].on}
             if keys:
                 want["todos"] |= keys
                 return True, ["todos"], None
@@ -982,8 +1013,11 @@ class Notifications(Behavior):
         if not t.hears(booster, admitted=False):
             return False, [], None
         on_todo = rid if rtype == "Todo" else parent.get("id") if rtype == "Comment" and parent.get("type") == "Todo" else None
+        on_card = (rid if rtype == "Kanban::Card" else
+                   parent.get("id") if rtype == "Comment" and parent.get("type") == "Kanban::Card" else None)
         todos = t.load("todos.json", {})
-        keys = {k for k, r in todos.items() if on_todo is not None and r.get("todo") == on_todo
+        keys = {k for k, r in todos.items() if (on_todo or on_card) is not None and r.get("todo") == (on_todo or on_card)
+                and (on_todo is not None or r.get("type") == "card")
                 and str(r.get("bucket") or t.project) == bucket}
         if rtype == "Chat::Lines" and bucket != t.project:
             circles = {str(c["bucket"]) for c in t.ping_conversations(data)} | {
@@ -1060,7 +1094,7 @@ def stamp(r):
 # The timer runs the "on" behaviors that are due in this order: notifications first, so the owner's input is not held
 # up by the card mirror; inbox delivery after every reader, then the session alert, which watches what it delivered.
 ALL = (Notifications, CardMirror, ChatInbox, ChatAsks, ReleaseAnnouncements, SecurityAdvisories, CheckinAnswering, DecisionTodos,
-       AssignedTodos, Reports, Pings, InboxDelivery, SessionAlert)
+       AssignedTodos, AssignedCards, Reports, Pings, InboxDelivery, SessionAlert)
 # The readers notifications take over: with notifications on they run as the hourly repair sweep.
 # assigned-todos keeps its 5-minute sweep: a request's edits and the owner's boosts on it reach no notification.
 SWEPT = ("chat-inbox", "decision-todos", "reports", "pings")
@@ -1083,6 +1117,9 @@ def scheduled(rec):
 def inbox_note(rec, account, project):
     """A pending record as an inbox note: (request id, short plain body)."""
     kind = rec.get("kind") or "comment"
+    # A card request (assigned-cards) is handled as a to-do request is; only what it is called differs.
+    noun = "card" if kind.startswith("card-request") or rec.get("type") == "card" else "to-do"
+    step = "todo-" + kind[5:] if kind.startswith("card-request") else kind
     card_url = f"https://app.basecamp.com/{account}/buckets/{project}/card_tables/cards/{rec.get('card')}"
     text = " ".join(str(rec.get("text") or "").split())
     if len(text) > 600:
@@ -1125,7 +1162,7 @@ def inbox_note(rec, account, project):
         url = rec.get("url")
     elif kind == "todo-comment" and rec.get("request"):
         rid = rec.get("comment")
-        what = f"Basecamp comment from {who} on to-do request {rec.get('title')!r} ({rec.get('key')}){elsewhere}"
+        what = f"Basecamp comment from {who} on {noun} request {rec.get('title')!r} ({rec.get('key')}){elsewhere}"
         handle = (f"part of the request: act on it, then sync.py reply --recording {rid}; when the work is done, "
                   f"sync.py todo complete --todo {rec.get('key')}")
         url = rec.get("url")
@@ -1139,7 +1176,7 @@ def inbox_note(rec, account, project):
         url = rec.get("url")
     elif kind == "boost":
         rid = rec.get("boost")
-        todo = (f"to-do request {rec.get('title')!r} ({rec.get('key')}){elsewhere}" if rec.get("request")
+        todo = (f"{noun} request {rec.get('title')!r} ({rec.get('key')}){elsewhere}" if rec.get("request")
                 else f"decision to-do {rec.get('key')}")
         where = {"todo": todo, "todo-comment": f"a comment on {todo}",
                  "card": f"the card for task {rec.get('task')}",
@@ -1157,11 +1194,11 @@ def inbox_note(rec, account, project):
         if not captain:
             handle = "a reaction to what was boosted, like a comment from them: weigh it; never a captain decision or approval"
         url = rec.get("url")
-    elif kind == "todo-request":
+    elif step == "todo-request":
         rid = f"{rec.get('todo')}-{rec.get('n', 1)}"
         assigned = ("the next occurrence of a repeating to-do, asked for" if rec.get("follows") else
                     "assigned to you again" if rec.get("reopened") else "assigned to you")
-        what = (f"Basecamp to-do {assigned} by {who}, a request: {rec.get('title')!r} ({rec.get('key')}){elsewhere}"
+        what = (f"Basecamp {noun} {assigned} by {who}, a request: {rec.get('title')!r} ({rec.get('key')}){elsewhere}"
                 + scheduled(rec))
         handle = ("captain work: take it on as a task, answer questions on it with sync.py todo comment --todo "
                   f"{rec.get('key')}, then sync.py todo complete --todo {rec.get('key')} when the work is done") if captain else (
@@ -1175,17 +1212,19 @@ def inbox_note(rec, account, project):
         if rec.get("repeats"):
             handle += ("; it repeats on Basecamp's schedule: comment the results and complete it, and Basecamp makes the "
                        "next occurrence, which arrives as a new request; never create it yourself")
+        if noun == "card":
+            handle += "; completing it moves the card to its table's Done column"
         if elsewhere:
             handle += "; it is in another project, so route the work to the home or domain that owns that project"
         url = rec.get("url")
-    elif kind in ("todo-request-update", "todo-request-closed"):
+    elif step in ("todo-request-update", "todo-request-closed"):
         # A move of only the due date or repetition is an update of its own, so the schedule is in its id when recorded.
         schedule = json.dumps([rec.get("due_on"), rec.get("repeats")], sort_keys=True) if "due_on" in rec else ""
         rid = f"{rec.get('todo')}-{rec.get('n', 1)}-" + (rec.get("reason") or hashlib.sha256(
             str(rec.get("title")).encode() + str(rec.get("text")).encode() + schedule.encode()).hexdigest()[:12])
         by = f" by {who}" if rec.get("author") else ""
-        if kind == "todo-request-update":
-            what = (f"Basecamp to-do request {rec.get('title')!r} ({rec.get('key')}){elsewhere} edited{by}"
+        if step == "todo-request-update":
+            what = (f"Basecamp {noun} request {rec.get('title')!r} ({rec.get('key')}){elsewhere} edited{by}"
                     + (scheduled(rec) or (", now undated" if "due_on" in rec else "")) + "; it now reads")
             text = text or "(no description)"
             handle = "an update to the request: adjust the work to it" + ("" if captain or not rec.get("author") else
@@ -1194,7 +1233,7 @@ def inbox_note(rec, account, project):
                 handle += "; its due date and repetition are Basecamp's, as above: follow them, not a date read earlier"
         else:
             reason = rec.get("reason")
-            what = (f"Basecamp to-do request {rec.get('title')!r} ({rec.get('key')}){elsewhere} "
+            what = (f"Basecamp {noun} request {rec.get('title')!r} ({rec.get('key')}){elsewhere} "
                     + {"completed": f"completed{by}", "unassigned": f"no longer assigned to you{by}"}.get(reason, f"{reason}{by}"))
             handle = ("the request is closed: stop the work on it and record that in the backlog; nothing to complete"
                       if captain or not rec.get("author") else
