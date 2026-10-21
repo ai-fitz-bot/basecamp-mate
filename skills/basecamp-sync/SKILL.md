@@ -13,7 +13,7 @@ config turns on, each composed from tools: the card mirror (`tables`, `repos`; o
 check-in answering (`checkins`), release announcements (`releases`), decision to-dos
 (`todos`), reports (`message_board`), Pings (`pings`: the owner's direct messages to the
 agent's login, outside the project), to-do requests (`assigned_todos`: to-dos the owner
-assigns to the agent's login, in the project or, with `"scope": "account"`, anywhere in the account), inbox delivery (`inbox`), the session alert (`session_alert`: one chat line
+assigns to the agent's login, in the project or, with `"scope": "account"`, anywhere in the account), card requests (`assigned_cards`: cards the owner assigns to the agent's login, handled the same way), inbox delivery (`inbox`), the session alert (`session_alert`: one chat line
 to the owner while no firstmate session holds the home's lock and inbox notes wait, as after a reboot) and notifications (on
 with a `profile`: every run reads the agent login's Basecamp notifications and boosts and
 runs the reader for each thread that changed, so the captain's input arrives within about
@@ -167,6 +167,17 @@ Every other home on that login keeps `"assigned_todos": {}` (its own project), o
 to-do reaches several homes; `basecamp-mate doctor` flags two homes on this computer doing
 it with the same account and `profile`.
 
+**Cards assigned to you** (`"assigned_cards": {}`, `init --assigned-cards`; off by
+default; the same `limit` and `scope` as `assigned_todos`): a card a listened-to person
+assigns to this home's login is a request handled exactly like a to-do request. It
+arrives once as a `card-request` (key `request-<card id>`), its edits and closing as
+`card-request-update` and `card-request-closed`, and its comments and boosts as
+`todo-comment` and `boost` records with `request: true` and `type: "card"`. Answer with
+`sync.py reply` or `sync.py todo comment --todo <key>`; when the work is done,
+`sync.py todo complete --todo <key>` completes the card, which Basecamp shows by moving it
+to the table's Done column. Cards the card mirror makes from the backlog are never
+requests.
+
 ## One home per project and login
 
 Two homes on this computer that watch the same project, the same login's Pings, or its
@@ -231,6 +242,8 @@ that read.
 - `todo-request`, `todo-request-update`, `todo-request-closed`: a to-do assigned to this
   home's login (with `due_on`, `repeats` and, for a repeating to-do's next occurrence,
   `follows`), an edit to it (its text or its schedule), or its closing; see "To-do requests".
+- `card-request`, `card-request-update`, `card-request-closed`: the same for a card assigned
+  to this home's login (`assigned_cards`); see "Cards assigned to you".
 - `message-comment`: the captain commented on a Message Board post this home made (a
   report); it is feedback or an instruction on it. Act on it (relaying first outside the
   main firstmate's home), then answer with `sync.py reply --recording <comment id>`.

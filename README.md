@@ -114,6 +114,7 @@ Without `notifications` (no `profile`, or `"notifications": false`) those four r
 | `checkin-answering` | `checkins` | `--checkins <time zone>` | check-in reader (5 min) | `answer` |
 | `decision-todos` | `todos` | `--todos` | to-do comment reader (hourly sweep) | `todo create`, `reply`/`todo comment`, `todo complete` |
 | `assigned-todos` | `assigned_todos` | `--assigned-todos` (`--assigned-todos-anywhere`: account-wide) | to-do request readers, then the to-do comment reader for the requests (5 min) | take each request on; `todo comment`/`reply`; `todo complete` when done |
+| `assigned-cards` | `assigned_cards` | `--assigned-cards` | the to-do request readers for cards assigned to the agent, then the to-do comment reader for those requests (5 min) | as `assigned-todos`; `todo complete` moves the card to Done |
 | `reports` | `message_board` | `--reports` | comment and boost readers on the agent's messages (hourly sweep) | `post-message`; `reply` to feedback |
 | `pings` | `pings` | `--pings` | Ping reader (hourly sweep) | `reply` to each line, in the Ping |
 | `inbox-delivery` | `inbox` | `--inbox` | deliver each new pending record as a firstmate inbox note | handle the note, then `fm-inbox.sh drain --ack` |
@@ -250,6 +251,7 @@ own:
 | a comment or @mention on any other thread in the project (a document, an upload, someone else's to-do or message, a card nothing mirrors, a tracked to-do once completed or closed) | the thread reader: `thread-comment` or `mention` records. A thread's first read starts at the notification's first unread comment (or, when it names none, at when it became unread), and never before the newest comment a to-do, card or message reader already read there; a comment one of them recorded or answered is never recorded again |
 | an @mention of the agent in a chat nothing relays | a `chat-question` for that line |
 | `Assignment` or `Completion` of a to-do (with `assigned_todos` on; in any project with `"scope": "account"`) | the to-do request reader, or the request's edit and closing check; the notification says who assigned or completed it |
+| any other event on a card (an `Event`: assigned, moved, edited, completed), with `assigned_cards` on, unless the card mirror made it | the card request reader, or the request's edit and closing check; an event that leaves no request stays unmonitored |
 | a check-in `Reminder` (with `checkins` on) | the check-in reader: a faster signal than the 5-minute schedule check |
 
 The agent's login hears what it is subscribed to: what it created, commented on or was
@@ -381,6 +383,18 @@ assignment or completion is never unmonitored.
 
 Who assigned it decides how the agent treats it: from the captain it is captain work; from
 another listed person it is information or a request to weigh, never a captain decision.
+
+**Cards.** With `"assigned_cards": {}` (`init --assigned-cards`; off by default, the same
+`limit` and `scope` as `assigned_todos`), a card a listened-to person assigns to the agent's
+login is a request read the same way: a `card-request` record (key `request-<card id>`,
+tracked in `todos.json` with `"type": "card"`), then `card-request-update` and
+`card-request-closed`, and its comments and boosts as `todo-comment` and `boost` records
+with `"request": true` and `"type": "card"`. Basecamp raises an `Event` notification on the
+card when it is assigned, which the notification reader takes as the signal to read it; the
+5-minute sweep of `/my/assignments.json` is the repair sweep. `sync.py reply`, `todo comment`,
+`todo show` and `todo complete` work on it; `todo complete` completes the card, which
+Basecamp shows by moving it to its table's Done column. A card the card mirror made from the
+backlog (in `map.json`) is never a request, and `assigned_todos` is unchanged by it.
 
 **Scheduled to-dos.** A request with a due date is scheduled: every request record carries
 `due_on` (null when undated), and the agent does the work on that date, not before when
@@ -723,7 +737,8 @@ replaced the event listener); a config that differs from the discovered one only
 `--assigned-todos` adds `"assigned_todos": {}`: a to-do the owner assigns to the
 `--login` is a request (see To-do requests). `--assigned-todos-anywhere` adds
 `"assigned_todos": {"scope": "account"}` instead: one in any project of the account is (only
-in the main home; see To-do requests).
+in the main home; see To-do requests). `--assigned-cards` adds `"assigned_cards": {}`: a
+card the owner assigns to the `--login` in the project is a request (see To-do requests).
 
 `--no-cards` sets a home up without the card mirror: it reads no card tables (the project
 need not have any), writes a config without `tables` or `repos`, creates only
@@ -838,6 +853,9 @@ or by hand from
   most `n` newly assigned to-dos a sweep (default 10); `"scope": "account"` takes them from
   every project of the account (one home per login), the default `"project"` only from this
   one. See To-do requests.
+- `assigned_cards` (optional): `{}` or `{"limit": <n>, "scope": "project" | "account"}`: the
+  same for cards assigned to the acting login, never one the card mirror made. See To-do
+  requests (Cards).
 - `chats` (optional): chat (Campfire) ids whose owner questions are relayed.
   An entry may be `{"chat": <id>, "every_line": true}` to relay every owner line in that chat.
 - `ask_chat` (optional): the chat id `sync.py ask` posts in.
@@ -1067,6 +1085,9 @@ decision or an approval.
   `archived` or `unassigned`), `url`, `at`, `due_on`, `repeats`; `author` is who completed it,
   when known, else null. The request is closed and no longer read; nothing is left to
   complete. When it repeats, Basecamp's next occurrence arrives as a new `todo-request`.
+- `card-request`, `card-request-update`, `card-request-closed`: the same fields, for a card
+  assigned to the agent's login (`assigned_cards`); `todo` is the card id, `title` the card's
+  title and `text` its content. Handled like the to-do request records.
 - `message-comment`: `message` (id), `subject`, `comment` (id), `question`, `url` (the
   comment), `text`, `at`. The owner commented on a post the agent made, usually feedback
   or an instruction on a report; act on it and answer with `sync.py reply --recording <comment>`.

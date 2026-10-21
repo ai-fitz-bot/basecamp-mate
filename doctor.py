@@ -377,6 +377,11 @@ class Doctor:
                          f"to-do would reach all of them: {hs}",
                          'Fix: keep "assigned_todos": {"scope": "account"} only in the main home\'s settings, and set the '
                          'others to "assigned_todos": {} (their own project only).')
+            elif kind == "card-requests":
+                self.bad(f"{len(group)} homes take cards assigned anywhere in account {where} with {login}, so each such "
+                         f"card would reach all of them: {hs}",
+                         'Fix: keep "assigned_cards": {"scope": "account"} only in the main home\'s settings, and set the '
+                         'others to "assigned_cards": {} (their own project only).')
             elif kind == "pings":
                 self.bad(f"{len(group)} homes read the Pings of {login} in account {where}, so each Ping would reach all "
                          f"of them: {hs}", 'Fix: keep "pings" in one home\'s settings only.')

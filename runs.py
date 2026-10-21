@@ -45,6 +45,9 @@ def watches(cfg):
     opts = cfg.get("assigned_todos")
     if isinstance(opts, dict) and opts.get("scope") == "account":
         out.append(f"requests {account}")
+    opts = cfg.get("assigned_cards")
+    if isinstance(opts, dict) and opts.get("scope") == "account":
+        out.append(f"card-requests {account}")
     return out
 
 
