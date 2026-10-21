@@ -105,7 +105,9 @@ on the next 30-second run), and with `inbox-delivery` on it also delivers each n
 note in your firstmate inbox. The inbox note is the wake: it says what the record is, who
 wrote it, the text, its link and how to handle it. Handle it, then acknowledge it with
 `HOME/bin/fm-inbox.sh drain --ack <note id>`. (Without `inbox-delivery`, the wake check
-fires when the file grows instead; handle each new line once, in order.) The wake check
+fires when the file grows instead; handle each new line once, in order.) When you tell a
+person a record's time, quote its `at_local` (or `created_at_local`), the owner's local
+time with its zone, not the UTC `at`. The wake check
 still fires on a FAILED line in `sync.log`. By `kind`:
 
 - `todo-comment`: the captain commented on a decision to-do (section 3), or, with

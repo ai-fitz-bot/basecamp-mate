@@ -696,7 +696,7 @@ class SessionAlert(Behavior):
         now = datetime.now(timezone.utc).timestamp()
         if not notes or now - notes[0] < self.after:
             return
-        since = datetime.fromtimestamp(notes[0], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        since = t.local_time(datetime.fromtimestamp(notes[0], timezone.utc))
         if t.dry:
             t.log(f"dry session alert: post in chat {self.chat}, {len(notes)} note(s) waiting since {since}")
             return
@@ -1268,7 +1268,7 @@ def inbox_note(rec, account, project):
         rid = f"{rec.get('repo')}-{rec.get('ghsa')}" + ("" if kind == "advisory" else f"-{rec.get('state')}")
         sev = f", severity {rec['severity']}" if rec.get("severity") else ", no severity set"
         what = (f"GitHub security advisory {rec.get('ghsa')} on {rec.get('repo')} "
-                + (f"in {rec.get('state')}{sev}, reported by {rec.get('reporter') or 'unknown'} on {rec.get('created_at')}"
+                + (f"in {rec.get('state')}{sev}, reported by {rec.get('reporter') or 'unknown'} on {rec.get('created_at_local') or rec.get('created_at')}"
                    if kind == "advisory" else f"moved from {rec.get('previous')} to {rec.get('state')}"))
         text = text or str(rec.get("summary") or "")
         handle = ("security-sensitive work: route it to whoever owns the repository, validate the report privately, and "
