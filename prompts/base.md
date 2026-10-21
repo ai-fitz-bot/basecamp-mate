@@ -162,6 +162,19 @@ still fires on a FAILED line in `sync.log`. By `kind`:
   `state`); record the outcome and wrap up any work on it. Change nothing on GitHub.
 - `advisory-unreadable`: this login cannot read `repo`'s advisories; tell the captain it
   needs admin or security-manager access, or the repo should leave the config.
+- `dependabot-alert`: an open Dependabot alert on `repo` (`number`, `package`, `ecosystem`,
+  `severity`, `fixed_in`, `manifest`, `summary`, link), new or `reopened`. File a to-do for
+  it and route the fix the same day to whoever owns the repository: the dependency upgrade
+  goes through the normal PR flow. Bring a dismissal, or a fix that cannot be made (no
+  `fixed_in`, a breaking upgrade), to the captain as a decision to-do (section 3). Never
+  dismiss or otherwise change the alert on GitHub yourself.
+- `dependabot-baseline`: the first read of `repo`'s Dependabot alerts: `open` alerts already
+  open, counted `by_severity`, with a link. These are not reported one by one; if any are
+  open, file one to-do for that backlog and route it to the repo's owner, highest severity
+  first. Only alerts that open or reopen afterwards arrive as `dependabot-alert`.
+- `dependabot-unreadable`: this login cannot read `repo`'s Dependabot alerts (reported once);
+  tell the captain alerts may be off for the repo, or the login needs admin or
+  security-manager access.
 - `comment`, `question`, `approval` (card mirror only): their comment or 👍 on a card. Answer
   a question with `reply`; act on an approval as approving every recommendation on the card.
 - A FAILED line in `sync.log`: read it. A token failure needs `basecamp auth login -P firstmate`,
