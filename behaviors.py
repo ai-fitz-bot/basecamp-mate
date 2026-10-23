@@ -1255,6 +1255,17 @@ def scheduled(rec):
     return out
 
 
+def timing(rec):
+    """A scheduled request's `when` for its note, as a fact: the answer known for its list, or that none is yet."""
+    which = "repeating" if rec.get("repeats") else "dated"
+    lst = rec.get("list")
+    remember = f"sync.py schedule set --list {lst} --{'recurring' if rec.get('repeats') else 'dated'} due|before"
+    return {"ask": f"no one has said yet whether this list's {which} to-dos are done on the due date or before it "
+                   f"({remember} remembers the answer)",
+            "due": f"this list's {which} to-dos are done on their due date",
+            "before": f"this list's {which} to-dos are done before their due date"}.get(rec["when"], f"when: {rec['when']}")
+
+
 def inbox_note(rec, account, project):
     """A pending record as an inbox note: (request id, short plain body)."""
     kind = rec.get("kind") or "comment"
@@ -1345,6 +1356,8 @@ def inbox_note(rec, account, project):
         if rec.get("repeats"):
             facts.append("it repeats on Basecamp's schedule: once this one is completed, Basecamp makes the next "
                          "occurrence, which arrives as a new request")
+        if rec.get("when"):
+            facts.append(timing(rec))
         if noun == "card":
             facts.append("completing it moves the card to its table's Done column")
         if elsewhere:
@@ -1364,6 +1377,8 @@ def inbox_note(rec, account, project):
             facts = ["the request changed"]
             if rec.get("due_on") or rec.get("repeats"):
                 facts.append("its due date and repetition are Basecamp's and may move again")
+            if rec.get("when"):
+                facts.append(timing(rec))
             cmds = [f"sync.py todo show --todo {key}"]
         else:
             reason = rec.get("reason")

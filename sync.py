@@ -56,6 +56,7 @@ Usage: sync.py --home <home> --config <config.json> [--all] [--dry-run] [--inclu
        sync.py todo comment --home <home> --config <config.json> --todo <key or id> --body-file <file> [--dry-run]
        sync.py todo complete --home <home> --config <config.json> --todo <key or id> [--dry-run]
        sync.py todo show --home <home> --config <config.json> --todo <key or id>
+       sync.py schedule show|set --home <home> --config <config.json> [--list <id>] [--dated ask|due|before] [--recurring ask|due|before] [--dry-run]
        sync.py decide --home <home> --config <config.json> --on <to-do or card id or URL> --question <text> --body-file <file> [--key <key>] [--project <id>] [--decider <person id>] [--dry-run]
        sync.py post-message --home <home> --config <config.json> --subject <text> --body-file <file> [--dry-run]
        sync.py unmonitored list|handle|forget --home <home> --config <config.json> [--key <key>] [--decision <text>] [--dry-run]
@@ -316,6 +317,28 @@ def cli(argv=None, runner=subprocess.run):
         a = ap.parse_args(argv[1:])
         return command(a, what, lambda s: s.ask(read(a.body_file)) if what == "ask"
                        else s.answer(a.question, read(a.body_file)), runner)
+    if argv[:1] == ["schedule"]:
+        sub = argv[1:2][0] if argv[1:] else None
+        if sub not in ("show", "set"):
+            print("usage: sync.py schedule {show,set} --home <home> --config <config.json> ...", file=sys.stderr)
+            return 2
+        ap = common(f"sync.py schedule {sub}", "Print when scheduled requests are done: the config's default and the "
+                    "answers remembered per list." if sub == "show" else
+                    "Remember when dated or repeating requests are done, for one to-do list (or card column) or by default.")
+        if sub == "set":
+            ap.add_argument("--list", help="the to-do list (or card column) id; without it, every list without its own")
+            ap.add_argument("--dated", choices=("ask", "due", "before"), help="requests with a due date")
+            ap.add_argument("--recurring", choices=("ask", "due", "before"), help="repeating requests")
+            ap.add_argument("--dry-run", action="store_true")
+        a = ap.parse_args(argv[2:])
+        if sub == "show":
+            s = Sync(a.home, a.config, runner=runner)
+            print(json.dumps({"config": s.schedule, **s.load("schedule.json", {})}, indent=1, sort_keys=True))
+            return 0
+        if not (a.dated or a.recurring):
+            ap.error("give --dated and/or --recurring")
+        return command(a, "schedule set", lambda s: [s.schedule_set(w, v, a.list) for w, v in
+                                                     (("dated", a.dated), ("recurring", a.recurring)) if v], runner)
     if argv[:1] == ["decide"]:
         ap = common("sync.py decide", "Put a decision on the to-do or card it is about: a comment there and a step "
                                       "(subtask) assigned to the person who has to decide.")

@@ -168,9 +168,13 @@ work is done, comment what was done with full links, then
 anyone else are ignored.
 
 **Scheduled to-dos.** Every request record carries `due_on` (null when undated) and
-`repeats` (Basecamp's repetition rule, null when it does not repeat). A scheduled request
-is done on its due date, not before when its description says so; it stays open until
-then. Basecamp alone owns the schedule: a moved due date or a changed or removed rule
+`repeats` (Basecamp's repetition rule, null when it does not repeat), and, with the
+config's `schedule`, `when` and its `list`: `ask` (comment to ask whether to do it on the
+due date or before, then remember the answer for that list with `sync.py schedule set
+--list <list> --dated due|before`, or `--recurring` for a repeating one), `due` (on the due
+date) or `before` (before it), as the home's defaults say. Without `when`, a scheduled
+request is done on its due date, not before when its description says so; it stays open
+until then. Basecamp alone owns the schedule: a moved due date or a changed or removed rule
 arrives as a `todo-request-update` with the new `due_on` and `repeats`, and on the day,
 before acting, re-read it with `sync.py todo show --todo <key>` (read-only) instead of
 trusting a date saved earlier. For a repeating to-do, do the occurrence on its date,

@@ -83,6 +83,7 @@ policy. Each does one thing to the configured account and project:
 | `sync.py todo comment` | command | comments on a tracked to-do |
 | `sync.py todo complete` | command | completes a tracked to-do (a decision to-do, or a to-do request when the work is done) |
 | `sync.py todo subtask` | command | completes one native subtask (decision) of a multi-decision to-do, or a decision step; a decision to-do completes once all are done (never a request, or a to-do or card a step was only put on) |
+| `sync.py schedule show\|set` | command | prints, or remembers per to-do list (or by default), when dated and repeating requests are done (`ask`, `due`, `before`); local state only |
 | `sync.py decide` | command | puts a decision on the to-do or card it is about (any project): a comment there and a step (a native subtask) assigned to the decider, the captain or an operator; their comments, boosts and checking the step (`decision-step-done`) come back; the to-do or card itself is never completed |
 | `sync.py todo show` | command | reads a tracked to-do as Basecamp has it now (open or not, due date, repetition rule), read-only |
 | `sync.py post-message` | command | posts a message (subject and body) on the configured message board |
@@ -1003,6 +1004,15 @@ or by hand from
 - `advisories` (optional): `{"repos": ["owner/name", ...]}`: record each new security
   advisory and each new or reopened open Dependabot alert of these GitHub repositories
   once. See Security advisories.
+- `schedule` (optional): `{"dated": "ask" | "due" | "before", "recurring": "ask" | "due" |
+  "before"}`: when a scheduled request is done by default, carried on its records as `when`
+  (with its `list`): `ask` the owner (a comment on it), on its `due` date, or `before` it.
+  `"recurring"` applies to a repeating request, `"dated"` to one with only a due date.
+  `sync.py schedule set --list <id> --dated ...` remembers an answer for one to-do list (or
+  card column), and without `--list` for every list without its own, in `schedule.json`,
+  which wins over the config. `init` writes `{"dated": "ask", "recurring": "due"}` for a new
+  home with requests on and keeps an existing home's; without it, records carry no `when`
+  and the home's defaults file's wording stands.
 - `backup` (optional): `{"project": <bucket id>, "vault": <Docs & Files folder id>}`: keep
   one latest copy of the config and each state file in that folder, uploaded daily when
   changed. See Backup under Safety bounds.
@@ -1030,6 +1040,7 @@ claim, in `~/.local/state/basecamp-mate/runs/`; see "One home per project and lo
 | `pings.json` | the script | `since` (the Ping reader's first run) and, per Ping chat id, its bucket, title, URL, line cursor, owner lines recorded, acknowledgement boosts queued and done, boost counts and boosts seen, lines replied to |
 | `unmonitored.json` | the script | unmonitored key -> the first notification (or boost) and recording recorded, when, how many were seen, and the owner's decision once handled |
 | `backup.json` | the script | per backed-up file: its upload id in the backup folder, the SHA-256 of the content last uploaded, and when |
+| `schedule.json` | `sync.py schedule set` | when scheduled requests are done: `default` and per to-do list or card column (`lists`), each `{"dated", "recurring"}`, as the owner answered |
 | `blocked.json` | the script | `since` (when automatic replies to blocked senders started) and, per person and conversation (`<person>:<bucket>:<thread>`), when the last automatic reply was posted (kept two days) |
 | `sync.lock` | the script | the shared state lock held by a timer run or a command |
 | `participants.json` | the script | the project's non-client person ids, as last read for `"participants": {"project": true}` |
@@ -1151,6 +1162,11 @@ decision, approval and to-do request authorizing, project members and email doma
 as participants (clients, strangers and masked emails not), never through boosts,
 assignments or unmonitored input, the project's people read once a run with its last list
 standing in, a participant's Ping, `init`'s flags and `doctor`'s domain check;
+`tests/test_schedule.py` covers when scheduled requests are done: `when` and `list` on a
+dated request (`ask` until its list has an answer), the list's remembered answer winning
+over the remembered default, the recurring default, nothing on an undated request or
+without `schedule`, an edit and `todo show` carrying it, `sync.py schedule set|show` and
+`init`'s new-home default;
 `tests/test_decision_steps.py` covers `sync.py decide`: a comment and a step assigned to the
 captain, tracked from then on, the captain's comment there relayed with `on`, their checking
 the step recorded once (the agent's own never), the to-do or card itself never completed, a

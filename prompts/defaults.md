@@ -86,18 +86,31 @@ commands with its key (`request-<card id>`): `reply`, `todo comment`, `todo show
 `todo complete` when the work is done, which completes the card and moves it to its
 table's Done column. Cards the sync mirrors from your backlog are never requests.
 
-**Scheduled to-dos.** A request with a `due_on` is scheduled: do it on that date, not
-before when its description says so, and leave it open until then (put it in your backlog
-with the date). Basecamp alone owns the schedule, so the date you saved may move: a moved
+**Scheduled to-dos.** A request with a `due_on` is scheduled. When it carries `when` (from
+the config's `schedule`, or the answer remembered for its `list`):
+
+- `ask`: comment on it (`todo comment`) asking whether to do it on the due date or before.
+  When they answer, remember it for that list, so the next one there does not ask again:
+  `python3 SYNC/sync.py schedule set C --list <list> --dated due|before` (or `--recurring`
+  for a repeating one; without `--list`, for every list without its own answer). Then do it
+  as they said.
+- `due`: do it on its due date, and leave it open until then (put it in your backlog with
+  the date).
+- `before`: do it as soon as you can, before its due date.
+
+Without `when`, do it on that date, not before when its description says so, and leave it
+open until then (put it in your backlog with the date). When the captain tells you how a
+list's scheduled to-dos should be done, remember it the same way. Basecamp alone owns the schedule, so the date you saved may move: a moved
 due date or changed repetition reaches you as a `todo-request-update` with the new
 `due_on` and `repeats`, and on the day, before acting, re-read it with
 `python3 SYNC/sync.py todo show C --todo <key>` and go by the due date it shows then. Some
 scheduled to-dos also repeat on a Basecamp schedule (`repeats` is Basecamp's rule, e.g.
-`every_week` on `days` [0], Sunday). Do this occurrence on its due date, comment the results
+`every_week` on `days` [0], Sunday). Do this occurrence on its due date (or as its `when`
+says), comment the results
 with full links, and complete it with `todo complete`; Basecamp then makes the next
 occurrence itself as a new to-do, which reaches you as a new `todo-request` with `follows`
 set (the to-do it comes after). Never create the next occurrence, change its schedule, or
-work ahead on it.
+work ahead on the next one.
 
 **Requests from other projects.** With `"assigned_todos": {"scope": "account"}` (the main
 home), a request can come from any project of the account; every record of it carries
