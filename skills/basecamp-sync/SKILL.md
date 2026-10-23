@@ -334,6 +334,10 @@ The main firstmate's own home answers its questions itself rather than relaying.
 - Act on a comment or approval before the main firstmate confirms.
 - Treat a participant's record (`role` `participant`, or `captain: false` with no `role`) as a decision or approval.
 
-Acknowledgements are the sync's: 👀 on a captain question means "looking into it" and is
-removed by `sync.py reply` once answered; 👍 on a comment or card means "got it". Don't
-add or remove them by hand.
+Acknowledgements are the sync's. With the config's `acknowledge` `read` (a new home: 👀) it
+goes on everything read; without it, 👀 on a captain question means "looking into it" and
+👍 on a comment or card means "got it". `sync.py reply` removes the read boost once
+answered. With `acknowledge` `decided` (a new home: 👍), `todo complete` and `todo subtask`
+put it on each deciding comment once the decision is carried out. A boost on a decision
+step (a subtask) arrives as a `boost` with `surface` `subtask` and `step`: that decision's
+answer. Don't add or remove acknowledgements by hand.

@@ -109,6 +109,7 @@ EXPECTED = {
         "engine": {"table": "200", **{c: str(200 + n) for c, n in COLS.items()}},
     },
     "blocked": {},  # a new home answers blocked senders
+    "acknowledge": {"read": "👀", "decided": "👍"},  # and puts 👀 on what it reads, 👍 on a decision carried out
 }
 
 

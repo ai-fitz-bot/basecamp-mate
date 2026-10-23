@@ -1004,6 +1004,13 @@ or by hand from
 - `advisories` (optional): `{"repos": ["owner/name", ...]}`: record each new security
   advisory and each new or reopened open Dependabot alert of these GitHub repositories
   once. See Security advisories.
+- `acknowledge` (optional): `{"read": "<emoji>", "decided": "<emoji>" | false}`: the boost
+  put on everything read (`read`; `reply` takes it off once it answers), and on each deciding
+  comment (the captain's or an operator's on a decision to-do or a to-do or card a decision
+  step is on) once `todo complete` or `todo subtask` carries the decision out (`decided`,
+  which also takes the read boost off). Absent: 👀 on a question and 👍 on anything else
+  when read, nothing after deciding, as before. `init` writes `{"read": "👀", "decided":
+  "👍"}` for a new home and keeps an existing home's.
 - `schedule` (optional): `{"dated": "ask" | "due" | "before", "recurring": "ask" | "due" |
   "before"}`: when a scheduled request is done by default, carried on its records as `when`
   (with its `list`): `ask` the owner (a comment on it), on its `due` date, or `before` it.
@@ -1162,6 +1169,11 @@ decision, approval and to-do request authorizing, project members and email doma
 as participants (clients, strangers and masked emails not), never through boosts,
 assignments or unmonitored input, the project's people read once a run with its last list
 standing in, a participant's Ping, `init`'s flags and `doctor`'s domain check;
+`tests/test_acknowledge.py` covers acknowledgements: 👀/👍 by question without
+`acknowledge`, its `read` boost on everything read and taken off by `reply`, its `decided`
+boost on the captain's deciding comment (never a participant's) once `todo complete` or
+`todo subtask` carries it out with the read boost taken off, once, a boost on a decision
+step relayed as its answer, and `init`'s new-home default;
 `tests/test_schedule.py` covers when scheduled requests are done: `when` and `list` on a
 dated request (`ask` until its list has an answer), the list's remembered answer winning
 over the remembered default, the recurring default, nothing on an undated request or

@@ -455,6 +455,11 @@ class Init:
             {"dated": "ask", "recurring": "due"} if self.assigned_todos or self.assigned_cards else None)
         if schedule:
             cfg["schedule"] = schedule
+        # A new home puts 👀 on everything it reads and 👍 on a deciding comment once it is carried out; an existing home
+        # keeps its own (none: 👀 on a question, 👍 on anything else, as before).
+        acknowledge = self.existing().get("acknowledge") if self.existing() is not None else {"read": "👀", "decided": "👍"}
+        if acknowledge:
+            cfg["acknowledge"] = acknowledge
         if problems:
             raise Refuse("init refused, nothing was written:\n  - " + "\n  - ".join(problems))
         gh_repos = {}

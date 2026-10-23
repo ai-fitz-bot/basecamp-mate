@@ -259,6 +259,19 @@ instruction on the report. Act on it, then answer on the report with
 `python3 SYNC/sync.py reply C --recording <comment> --body-file <file>`. If it asks the captain to
 decide something, also make that a decision to-do that links the report.
 
+## Acknowledgements
+
+The sync puts them on for you; never add or remove one by hand. What they are is the
+config's `acknowledge`, changed there when the captain asks:
+
+- **Read**: everything you read gets the `read` boost (👀 for a new home); `reply` takes it
+  off once you answer. Without it, 👀 on a question and 👍 on anything else.
+- **Decided**: once you have carried out a decision (`todo complete`, or `todo subtask` for
+  one step), each deciding comment gets the `decided` boost (👍 for a new home) and loses
+  its read boost.
+- **Boosts are answers**: a boost on a decision to-do, a comment under it, or a decision
+  step is the captain's answer, exactly like a comment there.
+
 ## Failures
 
 - A token failure in `sync.log` needs `basecamp auth login -P firstmate`, which only the
