@@ -1087,14 +1087,45 @@ class Tools:
                     self.record({"kind": "todo-comment", "key": key, "todo": rec["todo"], "comment": cid,
                                  "question": question, "url": c.get("app_url") or rec.get("url"),
                                  "text": text, "at": c.get("created_at"), **request_fields(rec),
+                                 **({"on": rec.get("title")} if rec.get("on") else {}),
                                  **self.author(c.get("creator"), rec.get("bucket"))})
                     rec.setdefault("comments", []).append(cid)
                     self.log(f"new owner comment on todo {key}: {cid}")
                 self.read_todo_boosts(key, rec, comments)
+                self.read_steps(key, rec)
                 self.acknowledge(f"todo {key}", rec, rec.get("bucket"))
                 if not self.dry:
                     rec["cursor"] = cursor
                     self.save_json("todos.json", state)
+
+    def read_steps(self, key, rec):
+        """Record each open decision step (a subtask `decide` assigned to someone) that someone other than the acting
+        user checked, once, as a `decision-step-done` record with who checked it, read from the step's events (a
+        subtask's own record does not say who completed it); the step is then marked done in rec. A dry run reads only."""
+        bucket = rec.get("bucket") or self.project
+        for n, step in enumerate(rec.get("subtasks") or [], 1):
+            if not step.get("decider") or step.get("done"):
+                continue
+            try:
+                events = self.bc("api", "get", f"/buckets/{bucket}/recordings/{step['id']}/events.json", project=bucket) or []
+            except RuntimeError as e:
+                self.log(f"todo {key}: step {n}: {e}")
+                continue
+            last = max((e for e in events if e.get("action") in ("completed", "uncompleted")),
+                       key=lambda e: e.get("created_at") or "", default=None)
+            if not last or last.get("action") != "completed":
+                continue
+            who = last.get("creator") or {}
+            if self.dry:
+                self.log(f"dry todo {key}: step {n} checked by {who.get('id')}")
+                continue
+            step["done"] = last.get("created_at") or now_iso()
+            if who.get("id") == self.acting_id():
+                continue
+            self.record({"kind": "decision-step-done", "key": key, "todo": rec["todo"], "step": step["id"], "number": n,
+                         "question": step.get("text"), "title": rec.get("title"), "url": rec.get("url"),
+                         "at": last.get("created_at"), **self.author(who, rec.get("bucket"))})
+            self.log(f"todo {key}: decision step {n} checked by {who.get('id')}")
 
     def read_todo_boosts(self, key, rec, comments):
         """The owner's boosts on the to-do (read every run) and on its comments (when their count changes)."""
@@ -1910,6 +1941,71 @@ class Tools:
             self.log(f"todo create {key}: subtask {n} {sub['id']}")
         return tid
 
+    def decide(self, on, question, comment, key=None, project=None, decider=None):
+        """Put a decision to `decider` (default the captain) on the to-do or card it is about: a comment there (`comment`,
+        Markdown) and a step on it (a native subtask asking `question`) assigned to them.
+
+        `on` is the to-do's or card's id or Basecamp URL, in `project` (default the URL's, else
+        the configured project). The decider must be the captain or an operator: only their
+        word decides. When something is already tracked there (a to-do request, a card
+        request, a decision to-do), the step joins that record, under its key; otherwise a new
+        record under `key` tracks the to-do or card ("on": true), and its comments and boosts
+        from then on are relayed as `todo-comment` and `boost` records. Either way the step's
+        checking by anyone but the acting user is recorded as `decision-step-done`. `todo
+        subtask` completes the step once the decision is carried out; on an "on" record
+        nothing ever completes the to-do or card itself, which is not the agent's. Returns
+        the key, or None when nothing was posted.
+        """
+        self.need_todos(requests=False)
+        if not question.strip() or not comment.strip():
+            raise ValueError("a decision step needs a question and a comment")
+        m = re.search(r"/buckets/(\d+)/", str(on))
+        bucket = str(project or (m.group(1) if m else self.project))
+        ids = re.findall(r"(?:^|/)(\d+)(?=$|[/?#.])", str(on).split("#")[0])
+        if not ids:
+            raise ValueError(f"{on!r} is not a to-do or card id or URL")
+        rid = int(ids[-1])
+        decider = int(decider or self.captain)
+        if self.role({"id": decider}, admitted=False, bucket=bucket) not in AUTHORITY:
+            raise ValueError(f"person {decider} is neither the captain nor an operator, so their word cannot decide")
+        with self.locked("todos.json"):
+            state = self.load("todos.json", {})
+        tracked = next((k for k, r in state.items() if r.get("todo") == rid and str(r.get("bucket") or self.project) == bucket
+                        and not r.get("completed") and not r.get("closed")), None)
+        if tracked is None and not key:
+            raise ValueError(f"{rid} is not tracked yet, so the decision needs a --key")
+        if tracked is None and key in state:
+            raise ValueError(f"key {key} already tracks to-do {state[key]['todo']}")
+        key = tracked or key
+        if self.refused(f"decide {key}", "owner"):
+            return None
+        thing = self.recording(rid, bucket)
+        if thing.get("type") not in ("Todo", "Kanban::Card"):
+            raise ValueError(f"{rid} is a {thing.get('type') or 'missing recording'}, not a to-do or card")
+        if self.dry:
+            self.log(f"dry decide {key}: comment on and add a step for {decider} to {rid} in project {bucket}")
+            return None
+        if tracked is None:
+            comments = self.bc("comments", "list", str(rid), project=bucket) or []
+            rec = {"todo": rid, "title": thing.get("title") or thing.get("content"), "url": thing.get("app_url"), "on": True,
+                   "cursor": max([c.get("id", 0) for c in comments], default=0), "boost_counts": {}, "boost_seen": [],
+                   "created": now_iso(), **({"bucket": int(bucket)} if bucket != str(self.project) else {}),
+                   **({"type": "card"} if thing.get("type") == "Kanban::Card" else {})}
+            with self.locked("todos.json"):
+                state = self.load("todos.json", {})
+                state[key] = rec
+                self.save_json("todos.json", state)
+        c = self.bc("comments", "create", str(rid), "-", input=comment, project=bucket) or {}
+        sub = self.bc("subtasks", "create", str(rid), question.strip(), "--assignees", str(decider), project=bucket) or {}
+        with self.locked("todos.json"):
+            state = self.load("todos.json", {})
+            rec = state[key]
+            rec["cursor"] = max(rec.get("cursor") or 0, c.get("id") or 0)
+            rec.setdefault("subtasks", []).append({"text": question.strip(), "done": None, "id": sub["id"], "decider": decider})
+            self.save_json("todos.json", state)
+        self.log(f"decide {key}: comment {c.get('id')} and step {sub['id']} for {decider} on {rid} in project {bucket}")
+        return key
+
     def todo_track(self, key, tid, project=None):
         """Track an existing to-do (in `project`, default the configured one) under `key`; its comments and boosts so far
         are not relayed. Writes nothing to Basecamp."""
@@ -1978,7 +2074,11 @@ class Tools:
         if self.dry:
             self.log(f"dry todo complete {key}: complete todo {rec['todo']}")
             return False
-        if rec.get("type") == "card":
+        if rec.get("on"):  # a to-do or card that is not the agent's (decide): only its own open steps are completed
+            for q in rec.get("subtasks") or []:
+                if q.get("decider") and not q.get("done"):
+                    self.bc("subtasks", "complete", str(q["id"]), project=rec.get("bucket"))
+        elif rec.get("type") == "card":
             bucket = rec.get("bucket") or self.project
             c = self.bc("api", "get", f"/buckets/{bucket}/card_tables/cards/{rec['todo']}.json", project=bucket) or {}
             if c.get("completed"):
@@ -1995,8 +2095,9 @@ class Tools:
         return True
 
     def todo_subtask(self, ref, number):
-        """Complete subtask `number` (from 1) of a tracked to-do, answered, as Basecamp's native subtask; the to-do is
-        completed once every subtask is."""
+        """Complete subtask `number` (from 1) of a tracked to-do, answered, as Basecamp's native subtask (a decision step
+        `decide` added included); a decision to-do is completed once every subtask is, never a request or a to-do or card
+        the decision was only put on (that record just stops being tracked)."""
         self.need_todos()
         key, rec = self.tracked(ref)
         subtasks = rec.get("subtasks") or []
@@ -2019,7 +2120,7 @@ class Tools:
             self.save_json("todos.json", state)
         left = sum(not q["done"] for q in subtasks)
         self.log(f"todo subtask {key} {number}: done, {left} left on todo {rec['todo']}")
-        if not left:
+        if not left and not rec.get("request"):
             self.todo_complete(key)
         return True
 

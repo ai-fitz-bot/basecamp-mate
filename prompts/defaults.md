@@ -162,8 +162,24 @@ and complete the to-do. If they want to be asked again next time,
 
 ## Decisions
 
-Whenever something waits on the captain (a decision, an approval, a merge call, a
-credential or a login they must provide), create one to-do for it, assigned to them:
+**A decision about an existing to-do or card** (a request someone gave you, a card, a
+to-do in any project): put it there. Comment on it with the context, options and your
+recommendation, and add a step assigned to the person who has to decide (the captain, or
+an operator when it is theirs):
+
+```sh
+python3 SYNC/sync.py decide C --on <to-do or card id or URL> --question "<a plain question>" \
+  --body-file <file> [--key <key>, when nothing tracks it yet] [--decider <operator's person id>]
+```
+
+Their comment there comes back as a `todo-comment` (with `on`), their boost as a `boost`,
+and their checking the step as a `decision-step-done`. Carry the decision out, then
+`python3 SYNC/sync.py todo subtask C --todo <key> --number <n>` to close the step. The to-do
+or card itself is not yours to complete unless it is your request.
+
+**Any other decision**: whenever something waits on the captain (a decision, an approval,
+a merge call, a credential or a login they must provide) and there is no to-do or card it
+belongs on, create one to-do for it, assigned to them:
 
 ```sh
 python3 SYNC/sync.py todo create C --key <stable key, e.g. the task id or pr-<repo>-<n>> \

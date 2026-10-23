@@ -56,6 +56,7 @@ Usage: sync.py --home <home> --config <config.json> [--all] [--dry-run] [--inclu
        sync.py todo comment --home <home> --config <config.json> --todo <key or id> --body-file <file> [--dry-run]
        sync.py todo complete --home <home> --config <config.json> --todo <key or id> [--dry-run]
        sync.py todo show --home <home> --config <config.json> --todo <key or id>
+       sync.py decide --home <home> --config <config.json> --on <to-do or card id or URL> --question <text> --body-file <file> [--key <key>] [--project <id>] [--decider <person id>] [--dry-run]
        sync.py post-message --home <home> --config <config.json> --subject <text> --body-file <file> [--dry-run]
        sync.py unmonitored list|handle|forget --home <home> --config <config.json> [--key <key>] [--decision <text>] [--dry-run]
        sync.py backup --home <home> --config <config.json> [--dry-run]
@@ -315,6 +316,19 @@ def cli(argv=None, runner=subprocess.run):
         a = ap.parse_args(argv[1:])
         return command(a, what, lambda s: s.ask(read(a.body_file)) if what == "ask"
                        else s.answer(a.question, read(a.body_file)), runner)
+    if argv[:1] == ["decide"]:
+        ap = common("sync.py decide", "Put a decision on the to-do or card it is about: a comment there and a step "
+                                      "(subtask) assigned to the person who has to decide.")
+        ap.add_argument("--on", required=True, help="the to-do's or card's id or Basecamp URL")
+        ap.add_argument("--question", required=True, help="the step's text: the decision, as a plain question")
+        ap.add_argument("--body-file", required=True, help="the comment: context, options and recommendation, Markdown")
+        ap.add_argument("--key", help="a stable key, when nothing tracks the to-do or card yet")
+        ap.add_argument("--project", help="its project (default: the URL's, else the configured project)")
+        ap.add_argument("--decider", help="who decides: the captain (default) or an operator, by person id")
+        ap.add_argument("--dry-run", action="store_true")
+        a = ap.parse_args(argv[1:])
+        return command(a, "decide", lambda s: s.decide(a.on, a.question, read(a.body_file), a.key, a.project, a.decider),
+                       runner)
     if argv[:1] == ["post-message"]:
         ap = common("sync.py post-message", "Post a message on the configured message_board.")
         ap.add_argument("--subject", required=True)

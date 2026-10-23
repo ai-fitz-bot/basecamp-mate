@@ -1308,7 +1308,8 @@ def inbox_note(rec, account, project):
         cmds, url = [f"sync.py reply --recording {rid}", f"sync.py todo complete --todo {key}"], rec.get("url")
     elif kind == "todo-comment":
         rid = rec.get("comment")
-        what = f"Basecamp comment from {who} on decision to-do {key}"
+        what = (f"Basecamp comment from {who} on {rec['on']!r}, where you put a decision step ({key})" if rec.get("on")
+                else f"Basecamp comment from {who} on decision to-do {key}")
         facts = [] if captain else ["their word is input on the captain's decision, never the decision itself"]
         cmds = [f"sync.py reply --recording {rid}"] + ([f"sync.py todo complete --todo {key}"] if captain else [])
         url = rec.get("url")
@@ -1378,6 +1379,11 @@ def inbox_note(rec, account, project):
                 f"{rec.get('parent_type') or 'a recording'}" + (f" {rec.get('title')!r}" if rec.get("title") else ""))
         facts = ["addressed to you" if kind == "mention" else "on something you follow"]
         cmds, url = [f"sync.py reply --recording {rid} (answers there)"], rec.get("url")
+    elif kind == "decision-step-done":
+        rid = f"{rec.get('todo')}-{rec.get('step')}"
+        what = (f"Basecamp decision step {rec.get('question')!r} on {rec.get('title')!r} ({key}) checked by {who}")
+        facts = ["the step was the decision put to them; their comment there, if any, says what they decided"]
+        cmds, url = [f"sync.py todo comment --todo {key}"], rec.get("url")
     elif kind == "unmonitored":
         rid = f"{key}-{rec.get('notification') or rec.get('event')}"
         what = (f"Basecamp activity from {who} that nothing monitors: {rec.get('event_type')} on "
