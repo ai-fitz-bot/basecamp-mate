@@ -46,7 +46,11 @@ forms) names someone whose word authorizes the agent as the captain's does, as
 "operators"; --participants-project (anyone on the project who is not a client) and
 --participants-domain <domain> (anyone whose email is at it; Basecamp shows other people's
 emails only to account admins, so for most logins it admits nobody) admit participants,
-who may ask the agent things but whose word never authorizes it. --listen is accepted for
+who may ask the agent things but whose word never authorizes it. Anyone else never reaches
+the agent; a new home also gets "blocked": {}, so someone else who @mentions, Pings or
+assigns the --login gets one short automatic reply (--blocked-reply <text> sets its text,
+--no-blocked-reply leaves it off, and a re-run without either keeps an existing config's
+setting). --listen is accepted for
 old scripts and does nothing: notifications on the timer replaced the event listener,
 and an existing config's "listen" key is dropped without --force. --no-chats leaves the
 dock's chats out. --no-keyring (on by default when BASECAMP_NO_KEYRING is set) gives the
@@ -237,7 +241,8 @@ class Init:
     def __init__(self, url, login, home, captain=None, listen_to=(), operators=(), participants_project=False,
                  participants_domains=(), repo_map=(), create_missing=False, dry=False,
                  force=False, cards=True, assign_captain=True, todos=False, reports=False, every_line=False, checkins=None, releases=True, inbox=False,
-                 session_alert=None, pings=False, assigned_todos=False, assigned_anywhere=False, assigned_cards=False, advisories=(), backup=None, chats=True, no_keyring=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
+                 session_alert=None, pings=False, assigned_todos=False, assigned_anywhere=False, assigned_cards=False, advisories=(), backup=None, chats=True, no_keyring=None,
+                 blocked=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
         self.account, self.project = parse_url(url)
         self.login, self.home = login, os.path.abspath(home)
         self.captain_arg, self.listen_to, self.operator_args = captain, list(listen_to), list(operators)
@@ -269,6 +274,9 @@ class Init:
         if bad:
             raise Refuse(f"--advisories takes a GitHub repository as owner/name, got {', '.join(bad)}")
         self.backup = parse_folder(backup) if isinstance(backup, str) else backup  # a folder URL, or the "backup" config
+        # The automatic reply to blocked senders: None keeps an existing config's setting (on for a new home), False
+        # leaves it off, a string is the reply's text.
+        self.blocked = blocked
         self.no_keyring = bool(os.environ.get("BASECAMP_NO_KEYRING")) if no_keyring is None else no_keyring
         if checkins is not None:
             try:
@@ -422,6 +430,11 @@ class Init:
             cfg["advisories"] = {"repos": self.advisories}
         if self.backup:
             cfg["backup"] = self.backup
+        blocked = {"reply": self.blocked} if isinstance(self.blocked, str) else {} if self.blocked is None else None
+        if self.blocked is None and os.path.exists(os.path.join(self.dir, "config.json")):
+            blocked = json.load(open(os.path.join(self.dir, "config.json"))).get("blocked")  # an existing home keeps its own
+        if blocked not in (None, False):
+            cfg["blocked"] = blocked
         if problems:
             raise Refuse("init refused, nothing was written:\n  - " + "\n  - ".join(problems))
         gh_repos = {}
@@ -658,6 +671,12 @@ def cli(argv, **kw):
     ap.add_argument("--backup", metavar="FOLDER_URL",
                     help="keep a daily snapshot of the config and state files in this Docs & Files folder "
                          "(https://3.basecamp.com/<account>/buckets/<project>/vaults/<folder>)")
+    ap.add_argument("--blocked-reply", metavar="TEXT",
+                    help="the automatic reply to someone the sync does not listen to who @mentions, Pings or assigns "
+                         "the --login (default: a short line saying the agent cannot act on it)")
+    ap.add_argument("--no-blocked-reply", action="store_true",
+                    help="post no automatic reply to blocked senders; what they write still never reaches the agent "
+                         "(a re-run without either flag keeps an existing config's setting)")
     ap.add_argument("--no-chats", action="store_true", help="leave the dock's chats out: no chat inbox")
     ap.add_argument("--no-keyring", action="store_true", default=None,
                     help="run the units with BASECAMP_NO_KEYRING=1 (the file credential store); "
@@ -668,13 +687,17 @@ def cli(argv, **kw):
     a = ap.parse_args(argv)
     if a.listen:
         print("--listen is no longer needed: notifications on the timer replaced the event listener", file=sys.stderr)
+    if a.blocked_reply is not None and (a.no_blocked_reply or not a.blocked_reply.strip()):
+        print("--blocked-reply takes the reply's text, and cannot be combined with --no-blocked-reply", file=sys.stderr)
+        return 2
     try:
         Init(a.url, a.login, a.home, captain=a.captain, listen_to=a.listen_to, operators=a.operator,
              participants_project=a.participants_project, participants_domains=a.participants_domain, repo_map=a.repo_map,
              create_missing=a.create_missing_columns, dry=a.dry_run, force=a.force,
              cards=not a.no_cards, assign_captain=not a.no_assign_captain, todos=a.todos, reports=a.reports, every_line=a.every_line,
              checkins=a.checkins, releases=not a.no_releases, inbox=a.inbox, session_alert=a.session_alert, pings=a.pings,
-             assigned_todos=a.assigned_todos, assigned_anywhere=a.assigned_todos_anywhere, assigned_cards=a.assigned_cards, advisories=a.advisories, backup=a.backup, chats=not a.no_chats, no_keyring=a.no_keyring, **kw).main()
+             assigned_todos=a.assigned_todos, assigned_anywhere=a.assigned_todos_anywhere, assigned_cards=a.assigned_cards, advisories=a.advisories, backup=a.backup, chats=not a.no_chats, no_keyring=a.no_keyring,
+             blocked=False if a.no_blocked_reply else a.blocked_reply, **kw).main()
     except Refuse as e:
         print(e, file=sys.stderr)
         return 2

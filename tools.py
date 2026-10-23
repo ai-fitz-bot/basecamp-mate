@@ -15,7 +15,9 @@ A tool does one explicit thing to the configured account and project, through th
     unmonitored recorder records, once per kind, the owner input no behavior handles;
     a boost on the acting login's own recording is recorded only once this run's read of
     its received boosts lists it (`confirmed`); who is heard, and whose word authorizes,
-    is `role` (the captain, "operators", "people" and admitted "participants");
+    is `role` (the captain, "operators", "people" and admitted "participants"), and
+    anyone else who addresses the acting login is dropped, with one automatic reply
+    when "blocked" is on (`block`);
   - commands post exactly what the agent hands them: `reply`, `ask`, `answer`,
     `todo create|track|comment|complete`, `post-message`; `unmonitored handle|forget`
     only edit local state;
@@ -37,6 +39,8 @@ from zoneinfo import ZoneInfo
 
 THUMBS, EYES = "\U0001F44D", "\U0001F440"
 AUTHORITY = ("captain", "operator")  # the roles whose word authorizes the agent: a decision or an approval
+# The automatic reply to someone the sync does not listen to who addresses the agent ("blocked": {} in the config).
+BLOCKED_REPLY = "Sorry, I can't act on this: I only take requests from the people I work for. Please ask one of them to pass it on."
 
 
 class BasecampError(RuntimeError):
@@ -75,6 +79,12 @@ class Tools:
         self.participant_project = parts.get("project", False)
         self.participant_domains = {str(d).strip().lower().lstrip("@") for d in parts.get("domains", []) if str(d).strip()}
         self._members = None  # the project's non-client person ids, for "participants": {"project": true}
+        # "blocked": anyone else who addresses the agent gets one short automatic reply; absent or false, none (as before).
+        blocked = cfg.get("blocked")
+        if blocked is not None and blocked is not False and not (
+                isinstance(blocked, dict) and set(blocked) <= {"reply"} and isinstance(blocked.get("reply", ""), str)):
+            raise ValueError('config "blocked" must be false, {} or {"reply": "<the automatic reply>"}')
+        self.blocked_reply = (blocked.get("reply") or "").strip() or BLOCKED_REPLY if isinstance(blocked, dict) else None
         self.profile = cfg.get("profile")
         self.ask_chat = str(cfg["ask_chat"]) if cfg.get("ask_chat") is not None else None
         self.checkins = cfg.get("checkins")
@@ -554,7 +564,10 @@ class Tools:
             if cid in rec.setdefault("comments", []):
                 continue
             rec["comments"].append(cid)
-            if self.hears(c.get("creator")):
+            if not self.hears(c.get("creator")):
+                if self.addressed(c.get("content")):
+                    self.block(c.get("creator"), self.project, rec["card"], cid, c.get("created_at"), what="comment")
+            else:
                 text = re.sub(r"<[^>]+>", "", c.get("content", ""))
                 kind = "question" if "?" in html.unescape(text) else "comment"
                 self.record({"kind": kind, "task": task, "repo": repo, "card": rec["card"], "comment": cid,
@@ -652,14 +665,16 @@ class Tools:
                 if lid <= cursor and not late:
                     continue
                 cursor = max(cursor, lid)
-                if first or not self.hears(ln.get("creator")):
+                if first:
                     continue
                 content = ln.get("content", "")
+                if not self.hears(ln.get("creator")):
+                    if lid in addressed or self.addressed(content):
+                        self.block(ln.get("creator"), self.project, chat, lid, ln.get("created_at"), chat=True, what="chat line")
+                    continue
                 text = html.unescape(re.sub(r"<[^>]+>", "", content)).strip()
-                if "?" not in text and chat not in every_line and lid not in addressed:
-                    self.acting_id()
-                    if not (self._acting_sgid and self._acting_sgid in content):
-                        continue
+                if "?" not in text and chat not in every_line and lid not in addressed and not self.addressed(content):
+                    continue
                 if self.dry:
                     self.log(f"dry chat {chat}: captain question {lid}")
                     self.acknowledge(f"chat {chat}", dict(rec, ack=[*rec.get("ack", []), [lid, EYES]]))
@@ -795,6 +810,72 @@ class Tools:
         return {"author": {"id": person.get("id"), "name": person.get("name")}, "captain": person.get("id") == self.captain,
                 "role": self.role(person) if person.get("id") is not None else None}
 
+    # --- blocked senders: someone the sync does not listen to who addresses the agent ---
+
+    def addressed(self, content):
+        """True when HTML `content` @mentions the acting user."""
+        self.acting_id()
+        return bool(self._acting_sgid and self._acting_sgid in (content or ""))
+
+    def blocked_since(self):
+        """When automatic replies started (blocked.json "since"), set the first time; nothing from before it is answered."""
+        state = self.load("blocked.json", {})
+        if not state.get("since") and not self.dry:
+            state["since"] = now_iso()
+            self.save_json("blocked.json", state)
+        return state.get("since")
+
+    def block(self, person, bucket, thread, item, at, chat=False, what="message"):
+        """Someone the sync does not listen to addressed the agent: an @mention, a Ping line, a to-do or card assigned.
+
+        Nothing of theirs reaches the agent: no record, no inbox note, no 👀; the block is
+        logged. With "blocked" on, the readers call this so they get one short automatic
+        reply where they wrote (a new line in chat `thread` when `chat`, else a comment on
+        recording `thread`, in `bucket`), at most once per person and conversation a day,
+        and only for `item`s made (ISO time `at`) after blocked.json "since". Never the
+        captain, the acting user or a system sender. A failed reply is logged and not
+        retried (it does not count as a failed call, so the notification is not re-read
+        for it). A dry run only logs. Returns True when a reply was posted.
+        """
+        person = person or {}
+        pid = person.get("id")
+        if not pid or pid == self.captain or pid == self.acting_id():
+            return False
+        who = f"{person.get('name') or 'person'} ({pid})"
+        where = f"{what} {item} in {bucket}/{thread}"
+        if self.blocked_reply is None:
+            self.log(f"blocked {who}: {where} not relayed, not someone the sync listens to (no automatic reply: \"blocked\" is off)")
+            return False
+        state = self.load("blocked.json", {})
+        since, key = state.get("since"), f"{pid}:{bucket}:{thread}"
+        last = state.get("replied", {}).get(key)
+        if self.agent() is None or not since or not later(at, since) or (last and recent(last, within=86400)):
+            why = ("the acting user is the owner or unset" if self.agent() is None else
+                   "from before automatic replies started" if not since or not later(at, since) else "already answered today")
+            self.log(f"blocked {who}: {where} not relayed, not someone the sync listens to (no reply: {why})")
+            return False
+        if self.dry:
+            self.log(f"dry blocked {who}: {where}: would post the automatic reply")
+            return False
+        errors = self.errors
+        try:
+            if chat:
+                self.bc("api", "post", f"/buckets/{bucket}/chats/{thread}/lines.json",
+                        "-d", json.dumps({"content": html.escape(self.blocked_reply, quote=False), "content_type": "text/html"}),
+                        project=bucket)
+            else:
+                self.bc("comments", "create", str(thread), "-", input=self.blocked_reply, project=bucket)
+        except RuntimeError as e:
+            self.errors = errors
+            self.log(f"blocked {who}: {where} not relayed; the automatic reply failed, not retried: {e}")
+            return False
+        replied = {k: v for k, v in state.get("replied", {}).items() if recent(v, within=2 * 86400)}
+        replied[key] = now_iso()
+        state["replied"] = replied
+        self.save_json("blocked.json", state)
+        self.log(f"blocked {who}: {where} not relayed, not someone the sync listens to; automatic reply posted")
+        return True
+
     def read_answer_boosts(self, questionnaires, days=7):
         """The owner's boosts on check-in answers the acting user posted in the last `days` days.
 
@@ -871,6 +952,8 @@ class Tools:
                         continue
                     cursor = cid
                     if not self.hears(c.get("creator")):
+                        if self.addressed(c.get("content")):
+                            self.block(c.get("creator"), self.project, m["id"], cid, c.get("created_at"), what="comment")
                         continue
                     text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", c.get("content", "")))).strip()
                     question = "?" in text
@@ -934,6 +1017,9 @@ class Tools:
                         continue
                     cursor = cid
                     if not self.hears(c.get("creator")):
+                        if self.addressed(c.get("content")):
+                            self.block(c.get("creator"), rec.get("bucket") or self.project, rec["todo"], cid,
+                                       c.get("created_at"), what="comment")
                         continue
                     text = html.unescape(re.sub(r"<[^>]+>", " ", c.get("content", "")))
                     text = re.sub(r"\s+", " ", text).strip()
@@ -980,7 +1066,8 @@ class Tools:
 
         One read of /my/readings.json (or `data`, a read already made): its "pings" section,
         read and unread, lists each recently active Ping with a listened-to person among
-        its participants or as its creator; the bucket and chat ids come from its
+        its participants or as its creator (with "blocked" on, every Ping, so anyone else's
+        line there gets the automatic reply); the bucket and chat ids come from its
         subscription_url. Newest activity first.
         """
         data = self.readings() if data is None else data
@@ -988,7 +1075,8 @@ class Tools:
         for r in (data.get("unreads") or []) + (data.get("reads") or []):
             m = re.search(r"/buckets/(\d+)/recordings/(\d+)/", r.get("subscription_url") or "")
             people = (r.get("participants") or []) + [r.get("creator") or {}]
-            if r.get("section") != "pings" or r.get("type") != "Chat" or not m or not any(self.hears(p) for p in people):
+            heard = self.blocked_reply is not None or any(self.hears(p) for p in people)  # "blocked": every Ping, to answer
+            if r.get("section") != "pings" or r.get("type") != "Chat" or not m or not heard:
                 continue
             found.setdefault(m.group(2), {"bucket": m.group(1), "chat": m.group(2), "title": r.get("bucket_name"),
                                           "url": r.get("app_url"), "updated_at": r.get("updated_at") or ""})
@@ -1034,7 +1122,10 @@ class Tools:
                 if lid <= cursor:
                     continue
                 cursor = lid
-                if not self.hears(ln.get("creator")) or not later(ln.get("created_at"), since):
+                if not later(ln.get("created_at"), since):
+                    continue
+                if not self.hears(ln.get("creator")):
+                    self.block(ln.get("creator"), bucket, chat, lid, ln.get("created_at"), chat=True, what="Ping line")
                     continue
                 if self.dry:
                     self.log(f"dry ping {chat}: owner line {lid}")
@@ -1179,6 +1270,8 @@ class Tools:
                 state["ignored"] = sorted({*state.get("ignored", []), tid})
                 self.save_json("assigned-todos.json", state)
             self.log(f"todo request {tid}: not assigned by someone listened to, ignored")
+            if by is not None:  # a notification named who assigned it; the sweep only guesses (its creator), so never answers
+                self.block(who, bucket or self.project, tid, tid, todo.get("updated_at"), what="card" if card else "to-do")
             return False
         if self.dry:
             self.log(f"dry todo request {tid}: record and acknowledge with {EYES}")
@@ -1321,6 +1414,7 @@ class Tools:
             self.log(f"mention {rid} in chat {chat}: {e}")
             return False
         if not self.hears(ln.get("creator")):
+            self.block(ln.get("creator"), bucket, chat, rid, ln.get("created_at"), chat=True, what="chat line")
             return False
         if self.dry:
             self.log(f"dry mention {rid} in chat {chat}: record and acknowledge with {EYES}")
@@ -1381,11 +1475,15 @@ class Tools:
             cursor = cid
             if new and since is None and after and history(c.get("created_at"), after):
                 continue  # there before the notification: the thread's history, not new input
-            if cid in known or not self.hears(c.get("creator")):
+            if cid in known:
+                continue
+            mention = cid in mentions or self.addressed(c.get("content"))
+            if not self.hears(c.get("creator")):
+                if mention:
+                    self.block(c.get("creator"), bucket, thread, cid, c.get("created_at"), what="comment")
                 continue
             text = plain(c.get("content"))
             on = c.get("parent") or {}
-            mention = cid in mentions or bool(self._acting_sgid and self._acting_sgid in (c.get("content") or ""))
             if self.dry:
                 self.log(f"dry thread {thread}: owner {'mention' if mention else 'comment'} {cid}")
                 continue
@@ -1953,15 +2051,15 @@ def boot_time():
 RECENT = 300  # seconds a boost the received-boosts read does not list yet is retried before it is dropped
 
 
-def recent(at, now=None):
-    """True when ISO time `at` is less than RECENT seconds ago; False when it is unreadable."""
+def recent(at, now=None, within=None):
+    """True when ISO time `at` is less than `within` seconds (default RECENT) ago; False when it is unreadable."""
     try:
         when = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
     except ValueError:
         return False
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
-    return ((now or datetime.now(timezone.utc)) - when).total_seconds() < RECENT
+    return ((now or datetime.now(timezone.utc)) - when).total_seconds() < (within or RECENT)
 
 
 def recording_type(t):

@@ -106,6 +106,7 @@ EXPECTED = {
         "server": {"table": "100", **{c: str(100 + n) for c, n in COLS.items()}},
         "engine": {"table": "200", **{c: str(200 + n) for c, n in COLS.items()}},
     },
+    "blocked": {},  # a new home answers blocked senders
 }
 
 

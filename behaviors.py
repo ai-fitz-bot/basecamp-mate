@@ -593,6 +593,27 @@ class Pings(Behavior):
         self.t.read_pings(self.limit)
 
 
+class BlockedReplies(Behavior):
+    """Answer someone the sync does not listen to, once, when they address the agent; nothing they write reaches it.
+
+    "blocked": {} turns it on with the default reply, {"reply": "<text>"} with that text;
+    absent or false, a blocked sender hears nothing (as before). Either way no record,
+    inbox note or 👀 is made for them and the block is logged. The readers post the reply
+    where the sender wrote (Tools.block): to an @mention of the agent in a chat line or a
+    comment, a Ping line, or a to-do or card they assigned it, at most once per person
+    and conversation a day. The timer step only starts the clock the first time, so
+    nothing from before it was on is answered.
+    """
+    name, keys = "blocked-replies", ("blocked",)
+
+    def __init__(self, t, cfg):
+        super().__init__(t, cfg)
+        self.on = t.blocked_reply is not None
+
+    def run(self, items=None):
+        self.t.blocked_since()
+
+
 class InboxDelivery(Behavior):
     """Deliver each new pending record to the firstmate inbox as a note: the wake for the agent.
 
@@ -1074,7 +1095,7 @@ class Notifications(Behavior):
             if ci.on and str(thread) in ci.chats:
                 want["chats"].setdefault(str(thread), set()).update([anchor] if mention else [])
                 return True, [f"chat {thread}"], None
-            if mention and t.hears(who):
+            if mention and (t.hears(who) or t.blocked_reply is not None):  # anyone else's mention: the automatic reply
                 want["mentions"][anchor] = (bucket, thread)
                 return True, [f"mention {anchor}"], None
             return True, [], self.check("chat.line.created", "Chat::Lines", thread, r) if t.hears(who, admitted=False) else None
@@ -1199,9 +1220,10 @@ def stamp(r):
     return r.get("unread_at") or r.get("updated_at") or r.get("created_at") or ""
 
 
-# The timer runs the "on" behaviors that are due in this order: notifications first, so the owner's input is not held
-# up by the card mirror; inbox delivery after every reader, then the session alert, which watches what it delivered.
-ALL = (Notifications, CardMirror, ChatInbox, ChatAsks, ReleaseAnnouncements, SecurityAdvisories, CheckinAnswering, DecisionTodos,
+# The timer runs the "on" behaviors that are due in this order: blocked replies' clock, then notifications, so the
+# owner's input is not held up by the card mirror; inbox delivery after every reader, then the session alert, which
+# watches what it delivered.
+ALL = (BlockedReplies, Notifications, CardMirror, ChatInbox, ChatAsks, ReleaseAnnouncements, SecurityAdvisories, CheckinAnswering, DecisionTodos,
        AssignedTodos, AssignedCards, Reports, Pings, InboxDelivery, SessionAlert, Backup)
 # The readers notifications take over: with notifications on they run as the hourly repair sweep.
 # assigned-todos keeps its 5-minute sweep: a request's edits and the owner's boosts on it reach no notification.

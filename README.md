@@ -30,7 +30,9 @@ Setup walks you through everything, one question at a time:
    reads your chat questions, asks you for decisions as to-dos and answers check-ins. It
    reads its own Basecamp notifications every 30 seconds, so it notices what you write to
    it within about half a minute. Card tables, release announcements, Message Board
-   reports and Pings stay off unless you say yes.
+   reports and Pings stay off unless you say yes. The agent listens only to you: anyone
+   else who @mentions, Pings or assigns it never reaches it, and gets a short automatic
+   reply instead (see "People the sync listens to" to change either).
 6. It turns on what the project needs, starts the background services, runs one test sync
    and tells you what is on.
 
@@ -120,6 +122,7 @@ Without `notifications` (no `profile`, or `"notifications": false`) those four r
 | `inbox-delivery` | `inbox` | `--inbox` | deliver each new pending record as a firstmate inbox note | handle the note, then `fm-inbox.sh drain --ack` |
 | `session-alert` | `session_alert` | `--session-alert [MINUTES]` (with `--inbox`; setup asks) | tell the owner once in chat when no firstmate session holds the lock while inbox notes wait (each minute) | start the session again |
 | `backup` | `backup` | `--backup <Docs & Files folder URL>` (setup keeps an existing one) | upload the config and state files that changed to the folder, one latest copy of each (daily) | `sync.py backup` to back up now |
+| `blocked-replies` | `blocked` | default for a new home (`--blocked-reply <text>`; `--no-blocked-reply` to leave off; a re-run keeps an existing setting) | none of its own: the readers post the automatic reply to a blocked sender; the timer step only starts its clock | none: nothing a blocked sender writes reaches the agent |
 
 The boundary: behaviors never run a CLI themselves (every Basecamp, GitHub, backlog or
 Lavish call goes through a tool), and tools never decide whether to run or what to do
@@ -132,6 +135,12 @@ never calls a card or card-table endpoint, and never writes `map.json`; the othe
 behaviors run the same either way. Set such a home up with `sync.py init --no-cards`.
 
 ## People the sync listens to
+
+Who gets through is explicit, and enforced before the agent: **what anyone else writes
+never reaches it.** Every reader checks the person first, so someone not on the lists below
+makes no pending record, no inbox note and no 👀, whatever they write and wherever. When
+they address the agent directly, the block is logged and, with `blocked` on, they get one
+short automatic reply (see "Blocked senders" below).
 
 By default the sync listens only to the captain. The agent acts with the captain's
 authority, so who else reaches it, and whose word counts, is widened only deliberately,
@@ -181,6 +190,37 @@ as the captain's)" or "from <name> (not the captain)"). A record **authorizes** 
 - decision to-dos, assigned cards and `sync.py ask` mentions are still the captain's alone.
 
 A config with only `captain` behaves exactly as before; its records gain only `role`.
+
+Operators are the trusted group for risky actions: name in `operators` the people whose
+word may authorize what only the captain could otherwise (a merge, a force-push, a
+credential), and keep everyone else a participant.
+
+### Blocked senders
+
+Someone the sync does not listen to **addresses** the agent when they @mention it in a chat
+line or a comment, write in a Ping with it (with `pings` on), or assign it a to-do or card
+(with `assigned_todos` or `assigned_cards` on, as a notification reports it). What they wrote
+is dropped before the agent, with a `blocked <name> (<id>): ... not relayed` line in
+`sync.log`. With `"blocked": {}` the sync also posts one short reply where they wrote:
+a new line in that chat or Ping, or a comment on that thread, to-do or card:
+
+> Sorry, I can't act on this: I only take requests from the people I work for. Please ask
+> one of them to pass it on.
+
+`{"reply": "<text>"}` posts your text instead. The reply goes out at most once per person
+and conversation a day, and never for anything written before automatic replies started
+(`blocked.json`'s `since`, set on the first run with `blocked` on). The captain, the
+acting login and Basecamp's own senders are never answered, and lines and comments that do
+not address the agent get no reply. A to-do the assignment sweep finds is never answered:
+the sweep only guesses who assigned it (its creator); only a notification names them. With
+`blocked` on, the Ping reader reads every Ping the login is in, not only those with someone
+listened to, so a stranger's Ping can be answered. A failed reply is logged and not retried.
+Like every post, nothing is posted without a `profile`, as the owner, or in a dry run.
+
+`init` turns it on for a new home; `--no-blocked-reply` leaves it off and `--blocked-reply
+<text>` sets the text. An existing config without `blocked` keeps today's behavior (the
+silent drop), and re-running `init` or `setup` keeps whatever the config has. To change it,
+edit `blocked` in the config, or ask the agent to.
 
 ## Card mirror
 
@@ -468,9 +508,10 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   acknowledgements and marking handled notifications read; never another home's.
 - Cards are never deleted, trashed or archived. Cards whose task left the backlog are
   left as they are (the run logs how many).
-- The sync never posts as a comment, and never to chat except the opt-in session alert
-  (one line per outage, below). Its other automatic post is a release announcement, and
-  only on the Message Board (below). Otherwise the only thing that
+- The sync never posts as a comment, and never to chat, except the opt-in session alert
+  (one line per outage, below) and, with `blocked` on, the short reply to a blocked sender
+  where they addressed the agent (see "Blocked senders"). Its other automatic post is a
+  release announcement, and only on the Message Board (below). Otherwise the only thing that
   posts is the explicit `sync.py reply` command below, run by the relaying agent to
   answer a captain question where it was asked: a comment on the card, or a line in the chat.
   Two more explicit commands post, both opt-in: `sync.py ask` (a new chat line for the
@@ -848,6 +889,10 @@ or by hand from
   also relay what anyone on the project (not a client), or with an email at a domain,
   writes to the agent, as a participant's. Domains need a login that sees email addresses
   (an account admin).
+- `blocked` (optional): `{}` or `{"reply": "<text>"}`: someone the sync does not listen to who
+  @mentions, Pings or assigns the agent gets one short automatic reply (the default text, or
+  yours). Absent or `false`: no reply. Either way nothing they write reaches the agent. `init`
+  writes `{}` for a new home and keeps an existing home's setting. See "Blocked senders".
 - `allow_duplicate` (optional): `true` lets a timer run go ahead beside another home's live
   run that watches the same thing with the same login. See "One home per project and
   login".
@@ -924,6 +969,7 @@ claim, in `~/.local/state/basecamp-mate/runs/`; see "One home per project and lo
 | `pings.json` | the script | `since` (the Ping reader's first run) and, per Ping chat id, its bucket, title, URL, line cursor, owner lines recorded, acknowledgement boosts queued and done, boost counts and boosts seen, lines replied to |
 | `unmonitored.json` | the script | unmonitored key -> the first notification (or boost) and recording recorded, when, how many were seen, and the owner's decision once handled |
 | `backup.json` | the script | per backed-up file: its upload id in the backup folder, the SHA-256 of the content last uploaded, and when |
+| `blocked.json` | the script | `since` (when automatic replies to blocked senders started) and, per person and conversation (`<person>:<bucket>:<thread>`), when the last automatic reply was posted (kept two days) |
 | `sync.lock` | the script | the shared state lock held by a timer run or a command |
 | `participants.json` | the script | the project's non-client person ids, as last read for `"participants": {"project": true}` |
 | `todos.json` | the script | to-do key -> to-do id, title, URL, created and completed times, comment cursor, owner comments recorded, acknowledgement boosts queued and done, comments replied to; for a to-do request (`request-<id>`), also who assigned it (`request`), how many times it was assigned (`requests`), a digest of its name and description, the project it is in (`bucket`, `project_name`), and why it closed (`closed`) |
@@ -1042,6 +1088,11 @@ decision, approval and to-do request authorizing, project members and email doma
 as participants (clients, strangers and masked emails not), never through boosts,
 assignments or unmonitored input, the project's people read once a run with its last list
 standing in, a participant's Ping, `init`'s flags and `doctor`'s domain check;
+`tests/test_blocked.py` covers blocked senders: a stranger's @mention in a relayed or
+unrelayed chat, a comment mention, a Ping and a notified assignment answered once in place
+and never relayed, once per person and conversation a day, never the captain, the agent or
+history, custom text, dry run, a failed reply, off by default for an existing config, and
+`init`'s new-home default and flags;
 `tests/test_received_boosts.py` covers boost confirmation: a listed boost recorded with
 the feed's booster and text from one feed read a run, an unlisted one retried while recent
 and then dropped, a feed entry by another booster or on another recording, a failed feed
