@@ -15,7 +15,8 @@ A tool does one explicit thing to the configured account and project, through th
     unmonitored recorder records, once per kind, the owner input no behavior handles;
     a boost on the acting login's own recording is recorded only once this run's read of
     its received boosts lists it (`confirmed`); who is heard, and whose word authorizes,
-    is `role` (the captain, "operators", "people" and admitted "participants"), and
+    is `role` (the captain, "operators", "people", "project_people" in their project and
+    admitted "participants"; `access` prints them), and
     anyone else who addresses the acting login is dropped, with one automatic reply
     when "blocked" is on (`block`);
   - commands post exactly what the agent hands them: `reply`, `ask`, `answer`,
@@ -69,16 +70,29 @@ class Tools:
         if not isinstance(people, list):
             raise ValueError('config "people" must be a list of Basecamp person ids')
         self.people = {self.captain, *self.operators, *(int(p) for p in people)}
-        # Participants admitted by rule: anyone on the project, or with an email at a domain. They may ask; never decide.
+        # "project_people": named participants heard only in one project of the account (its id -> person ids).
+        per = cfg.get("project_people", {})
+        if not isinstance(per, dict) or not all(isinstance(v, list) for v in per.values()):
+            raise ValueError('config "project_people" must be {"<project id>": [<person id>, ...], ...}')
+        self.project_people = {str(int(b)): {int(p) for p in ps} for b, ps in per.items()}
+        # Participants admitted by rule: anyone on the project, with an email at a domain, or in a company. They may ask;
+        # never decide.
         parts = cfg.get("participants")
-        if parts is not None and (not isinstance(parts, dict) or set(parts) - {"project", "domains"}
+        company = (parts or {}).get("company") if isinstance(parts, dict) else None
+        if parts is not None and (not isinstance(parts, dict) or set(parts) - {"project", "domains", "company"}
                                   or not isinstance(parts.get("project", False), bool)
-                                  or not isinstance(parts.get("domains", []), list)):
-            raise ValueError('config "participants" must be {"project": true} and/or {"domains": ["example.com", ...]}')
+                                  or not isinstance(parts.get("domains", []), list)
+                                  or not (company is None or company is True or isinstance(company, int)
+                                          and not isinstance(company, bool))):
+            raise ValueError('config "participants" must be {"project": true}, {"domains": ["example.com", ...]} and/or '
+                             '{"company": true or <company id>}')
         parts = parts or {}
         self.participant_project = parts.get("project", False)
         self.participant_domains = {str(d).strip().lower().lstrip("@") for d in parts.get("domains", []) if str(d).strip()}
+        self.participant_company = company  # True: the captain's company; an id: that company; None: no company rule
         self._members = None  # the project's non-client person ids, for "participants": {"project": true}
+        self._companies = None  # person id -> company id, as last read (companies.json), for "participants": {"company"}
+        self._company_read, self._unverified = set(), set()  # people read this run; people whose company is unknown
         # "blocked": anyone else who addresses the agent gets one short automatic reply; absent or false, none (as before).
         blocked = cfg.get("blocked")
         if blocked is not None and blocked is not False and not (
@@ -475,7 +489,7 @@ class Tools:
             retry = False
             for b in sorted(boosts, key=lambda b: b.get("id", 0)):
                 bid = b.get("id")
-                if bid in seen or not self.hears(b.get("booster"), admitted=False):
+                if bid in seen or not self.hears(b.get("booster"), admitted=False, bucket=bucket):
                     continue
                 if self.dry:
                     self.log(f"dry {surface} {rid}: owner boost {bid}")
@@ -490,7 +504,7 @@ class Tools:
                     continue
                 self.record({"kind": "boost", "surface": surface, **context, "recording": rid, "boost": bid,
                              "text": html.unescape(re.sub(r"<[^>]+>", "", b.get("content", ""))).strip(),
-                             "url": url, "at": b.get("created_at"), **self.author(b.get("booster"))})
+                             "url": url, "at": b.get("created_at"), **self.author(b.get("booster"), bucket)})
                 self.log(f"new owner boost on {surface} {rid}: {bid}")
             if count is not None and not retry:
                 counts[str(rid)] = count
@@ -750,33 +764,38 @@ class Tools:
         me = self.acting_id()
         return None if me in (None, "retry", self.captain) else me
 
-    def role(self, person, admitted=True):
+    def role(self, person, admitted=True, bucket=None):
         """Who `person` (a creator or booster object) is to the sync: "captain", "operator", "participant", or None.
 
         The captain's and an operator's word authorizes the agent; a participant's never
-        does. A participant is someone in "people", or, when `admitted` (what they wrote, not
-        a boost, an assignment or unmonitored input), someone "participants" admits: on the
-        project (not a client), or with an email at a listed domain. Anyone but the captain
-        is None when they are the acting user itself, so the agent's own lines are never
-        relayed back to it even when listed.
+        does. A participant is someone in "people", or in "project_people" for `bucket`
+        (where they wrote; default the configured project, so a Ping's own bucket matches
+        no project), or, when `admitted` (what they wrote, not a boost, an assignment or
+        unmonitored input), someone "participants" admits: on the project (not a client),
+        with an email at a listed domain, or in the company. Anyone but the captain is None
+        when they are the acting user itself, so the agent's own lines are never relayed
+        back to it even when listed.
         """
         person = person or {}
         pid = person.get("id")
         if pid == self.captain:
             return "captain"
-        role = "operator" if pid in self.operators else "participant" if pid in self.people else None
-        if role is None and not (admitted and (self.participant_project or self.participant_domains)):
+        named = pid in self.people or pid in self.project_people.get(str(bucket or self.project), ())
+        role = "operator" if pid in self.operators else "participant" if named else None
+        if role is None and not (admitted and (self.participant_project or self.participant_domains
+                                               or self.participant_company is not None)):
             return None
         if pid == self.acting_id():
             return None
         return role or ("participant" if self.admitted(person) else None)
 
-    def hears(self, person, admitted=True):
+    def hears(self, person, admitted=True, bucket=None):
         """True when `person` is someone the sync listens to (see role); `admitted` False hears only named people."""
-        return self.role(person, admitted) is not None
+        return self.role(person, admitted, bucket) is not None
 
     def admitted(self, person):
-        """True when "participants" admits `person`: an email at a listed domain, or (with "project") a project member.
+        """True when "participants" admits `person`: an email at a listed domain, someone in the company, or (with
+        "project") a project member.
 
         Basecamp masks other people's email addresses unless the login is an account admin,
         so a masked address matches no domain. A client is never admitted.
@@ -787,7 +806,41 @@ class Tools:
         email = str(person.get("email_address") or "").lower()
         if self.participant_domains and "@" in email and email.rsplit("@", 1)[1] in self.participant_domains:
             return True
+        if self.participant_company is not None:
+            company = self.company()
+            if company is not None and self.company_of(person) == company:
+                return True
         return self.participant_project and pid in self.members()
+
+    def company(self):
+        """The company "participants": {"company"} admits: its id, or with true the captain's company; None if unknown."""
+        if self.participant_company is True:
+            return self.company_of({"id": self.captain})
+        return self.participant_company
+
+    def company_of(self, person):
+        """`person`'s company id: from the person object when it carries one, else from their person record, read at
+        most once a run. companies.json keeps the last id read for each person, which stands in when a read fails; with
+        none, the person is unknown (None), so the company admits nobody it cannot check and they get no automatic
+        reply (Tools.block)."""
+        if self._companies is None:
+            self._companies = self.load("companies.json", {})
+        pid = person.get("id")
+        company = (person.get("company") or {}).get("id")
+        if company is None and pid not in self._company_read:
+            self._company_read.add(pid)
+            try:
+                company = ((self.bc("api", "get", f"/people/{pid}.json") or {}).get("company") or {}).get("id")
+            except RuntimeError as e:
+                self.log(f"participants: person {pid}'s company could not be read, using the last one known: {e}")
+        if company is not None and self._companies.get(str(pid)) != company:
+            self._companies[str(pid)] = company
+            if not self.dry:
+                self.save_json("companies.json", self._companies)
+        company = self._companies.get(str(pid)) if company is None else company
+        if company is None:
+            self._unverified.add(pid)
+        return company
 
     def members(self):
         """The project's people who are not clients, as ids: read at most once a run, when first needed, and kept in
@@ -804,11 +857,12 @@ class Tools:
                          f"({len(self._members)} people): {e}")
         return self._members
 
-    def author(self, person):
-        """A record's author fields: who wrote it ({"id", "name"}), whether that is the captain, and their role."""
+    def author(self, person, bucket=None):
+        """A record's author fields: who wrote it ({"id", "name"}), whether that is the captain, and their role (in
+        `bucket`, default the project)."""
         person = person or {}
         return {"author": {"id": person.get("id"), "name": person.get("name")}, "captain": person.get("id") == self.captain,
-                "role": self.role(person) if person.get("id") is not None else None}
+                "role": self.role(person, bucket=bucket) if person.get("id") is not None else None}
 
     # --- blocked senders: someone the sync does not listen to who addresses the agent ---
 
@@ -849,8 +903,10 @@ class Tools:
         state = self.load("blocked.json", {})
         since, key = state.get("since"), f"{pid}:{bucket}:{thread}"
         last = state.get("replied", {}).get(key)
-        if self.agent() is None or not since or not later(at, since) or (last and recent(last, within=86400)):
+        if (self.agent() is None or pid in self._unverified or not since or not later(at, since)
+                or (last and recent(last, within=86400))):
             why = ("the acting user is the owner or unset" if self.agent() is None else
+                   "their company could not be checked" if pid in self._unverified else
                    "from before automatic replies started" if not since or not later(at, since) else "already answered today")
             self.log(f"blocked {who}: {where} not relayed, not someone the sync listens to (no reply: {why})")
             return False
@@ -1016,7 +1072,7 @@ class Tools:
                     if cid <= cursor:
                         continue
                     cursor = cid
-                    if not self.hears(c.get("creator")):
+                    if not self.hears(c.get("creator"), bucket=rec.get("bucket")):
                         if self.addressed(c.get("content")):
                             self.block(c.get("creator"), rec.get("bucket") or self.project, rec["todo"], cid,
                                        c.get("created_at"), what="comment")
@@ -1031,7 +1087,7 @@ class Tools:
                     self.record({"kind": "todo-comment", "key": key, "todo": rec["todo"], "comment": cid,
                                  "question": question, "url": c.get("app_url") or rec.get("url"),
                                  "text": text, "at": c.get("created_at"), **request_fields(rec),
-                                 **self.author(c.get("creator"))})
+                                 **self.author(c.get("creator"), rec.get("bucket"))})
                     rec.setdefault("comments", []).append(cid)
                     self.log(f"new owner comment on todo {key}: {cid}")
                 self.read_todo_boosts(key, rec, comments)
@@ -1075,8 +1131,10 @@ class Tools:
         for r in (data.get("unreads") or []) + (data.get("reads") or []):
             m = re.search(r"/buckets/(\d+)/recordings/(\d+)/", r.get("subscription_url") or "")
             people = (r.get("participants") or []) + [r.get("creator") or {}]
-            heard = self.blocked_reply is not None or any(self.hears(p) for p in people)  # "blocked": every Ping, to answer
-            if r.get("section") != "pings" or r.get("type") != "Chat" or not m or not heard:
+            if r.get("section") != "pings" or r.get("type") != "Chat" or not m:
+                continue
+            # "blocked": every Ping, to answer. A Ping is a bucket of its own, so "project_people" never admits there.
+            if self.blocked_reply is None and not any(self.hears(p, bucket=m.group(1)) for p in people):
                 continue
             found.setdefault(m.group(2), {"bucket": m.group(1), "chat": m.group(2), "title": r.get("bucket_name"),
                                           "url": r.get("app_url"), "updated_at": r.get("updated_at") or ""})
@@ -1124,7 +1182,7 @@ class Tools:
                 cursor = lid
                 if not later(ln.get("created_at"), since):
                     continue
-                if not self.hears(ln.get("creator")):
+                if not self.hears(ln.get("creator"), bucket=bucket):
                     self.block(ln.get("creator"), bucket, chat, lid, ln.get("created_at"), chat=True, what="Ping line")
                     continue
                 if self.dry:
@@ -1133,7 +1191,7 @@ class Tools:
                 self.record({"kind": "ping", "bucket": int(bucket), "chat": int(chat), "line": lid, "title": p["title"],
                              "url": ln.get("app_url") or f"https://app.basecamp.com/{self.account}/circles/{bucket}@{lid}",
                              "text": html.unescape(re.sub(r"<[^>]+>", "", ln.get("content", ""))).strip(),
-                             "at": ln.get("created_at"), **self.author(ln.get("creator"))})
+                             "at": ln.get("created_at"), **self.author(ln.get("creator"), bucket)})
                 rec.setdefault("lines", []).append(lid)
                 rec.setdefault("ack", []).append([lid, EYES])
                 self.log(f"new owner ping line in {chat}: {lid}")
@@ -1264,13 +1322,15 @@ class Tools:
         who = creator if by is None or by == creator.get("id") else {"id": by, "name": None}
         if prev is not None and by is None:
             who = (prev.get("request") or {}).get("author") or who
-        if not self.hears(who, admitted=False):
+        if not self.hears(who, admitted=False, bucket=bucket):
             if by is None and not self.dry:
                 state = self.load("assigned-todos.json", {})
                 state["ignored"] = sorted({*state.get("ignored", []), tid})
                 self.save_json("assigned-todos.json", state)
             self.log(f"todo request {tid}: not assigned by someone listened to, ignored")
-            if by is not None:  # a notification named who assigned it; the sweep only guesses (its creator), so never answers
+            # Only a notification names who assigned it (the sweep only guesses: its creator), and a participant admitted
+            # by rule is listened to, just not for assignments: neither is a blocked sender to answer.
+            if by is not None and not self.hears(who, bucket=bucket):
                 self.block(who, bucket or self.project, tid, tid, todo.get("updated_at"), what="card" if card else "to-do")
             return False
         if self.dry:
@@ -1283,7 +1343,7 @@ class Tools:
                 rec.pop(k, None)
             n = rec.get("requests", 0) + 1
             rec.update(title=todo.get("content"), url=todo.get("app_url"), digest=todo_digest(todo), requests=n,
-                       request=self.author(who), bucket=int(bucket or self.project),
+                       request=self.author(who, bucket), bucket=int(bucket or self.project),
                        project_name=(todo.get("bucket") or {}).get("name") or rec.get("project_name"),
                        parent=(todo.get("parent") or {}).get("id"), **todo_schedule(todo))
             if card:
@@ -1297,7 +1357,7 @@ class Tools:
                          "title": todo.get("content"), "text": plain(todo.get("description")),
                          "assignees": [a.get("name") for a in todo.get("assignees") or []],
                          "url": todo.get("app_url"), "at": todo.get("updated_at") or todo.get("created_at"),
-                         "project": request_project(rec), **self.author(who)})
+                         "project": request_project(rec), **self.author(who, bucket)})
             self.log(f"todo request {key}: todo {tid} in project {rec['bucket']} assigned by {who.get('id')}")
             self.acknowledge(f"todo {key}", rec, rec["bucket"])
             state[key] = rec
@@ -1371,7 +1431,7 @@ class Tools:
         if self.dry:
             self.log(f"dry todo request {key}: {kind}" + (f" ({reason})" if reason else ""))
             return None
-        authored = self.author(who) if who else {"author": None, "captain": None}
+        authored = self.author(who, rec.get("bucket")) if who else {"author": None, "captain": None}
         with self.locked("todos.json"):
             state = self.load("todos.json", {})
             rec = state[key]
@@ -1999,6 +2059,38 @@ class Tools:
         del state[key]
         self.save_json("unmonitored.json", state)
         self.log(f"unmonitored: {key} forgotten")
+
+    def access(self, out=print):
+        """Print who gets through to the agent, and where; everyone else is blocked before it. Reads each person's
+        name (and the company's) from Basecamp, falling back to their id when a read fails. Read-only."""
+        names = {}
+
+        def name(pid):
+            if pid not in names:
+                try:
+                    names[pid] = (self.bc("api", "get", f"/people/{pid}.json") or {}).get("name") or f"person {pid}"
+                except RuntimeError:
+                    names[pid] = f"person {pid}"
+            return f"{names[pid]} ({pid})"
+
+        def listed(ids):
+            return ", ".join(name(p) for p in sorted(ids)) or "none"
+
+        out("Who gets through to the agent (anyone else is blocked before it):")
+        out(f"  captain: {name(self.captain)}, always; their word authorizes the agent")
+        out(f"  operators (their word counts as the captain's: the trusted group for risky actions): {listed(self.operators)}")
+        out(f"  people (participants everywhere this home reads): {listed(self.people - {self.captain} - self.operators)}")
+        for bucket, ids in sorted(self.project_people.items()):
+            out(f"  people in project {bucket} only (participants there): {listed(ids)}")
+        rules = (["anyone on the project who is not a client"] if self.participant_project else []) + (
+            [f"anyone with an email at {', '.join(sorted(self.participant_domains))}"] if self.participant_domains else [])
+        if self.participant_company is not None:
+            company = self.company()
+            rules.append(f"anyone in company {company if company is not None else 'unknown (the captain could not be read)'}"
+                         + (" (the captain's)" if self.participant_company is True else ""))
+        out("  participants by rule (they may ask; never their boosts or assignments): " + ("; ".join(rules) or "none"))
+        out("Blocked senders: " + (f"one automatic reply when they address the agent: {self.blocked_reply!r}"
+                                   if self.blocked_reply is not None else 'dropped with no reply ("blocked" is off)'))
 
 
 def request_fields(rec):

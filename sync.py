@@ -60,6 +60,7 @@ Usage: sync.py --home <home> --config <config.json> [--all] [--dry-run] [--inclu
        sync.py unmonitored list|handle|forget --home <home> --config <config.json> [--key <key>] [--decision <text>] [--dry-run]
        sync.py backup --home <home> --config <config.json> [--dry-run]
        sync.py behaviors --home <home> --config <config.json>
+       sync.py access --home <home> --config <config.json>      (who gets through to the agent, and where)
        sync.py setup [--answers <file.json>] [--yes]      (guided; also bin/basecamp-mate setup)
        sync.py doctor [--home <home>] [--config <config.json>]
        sync.py init <project URL> --login <profile> --home <home> [--captain <id or email>] [--listen-to <person>]... [--repo-map TABLE=REPO] [--dry-run]
@@ -332,6 +333,11 @@ def cli(argv=None, runner=subprocess.run):
         argparse.ArgumentParser(prog="sync.py status", description="List the sync runs recorded on this computer (live or "
                                 "stale, what each watches and with which login) and any sync.py running unrecorded.").parse_args(argv[1:])
         return runs.status()
+    if argv[:1] == ["access"]:
+        a = common("sync.py access", "List who gets through to the agent, and where; everyone else is blocked before it."
+                   ).parse_args(argv[1:])
+        Sync(a.home, a.config, runner=runner).access()
+        return 0
     if argv[:1] == ["behaviors"]:
         a = common("sync.py behaviors", "List the behaviors and whether this config turns each on.").parse_args(argv[1:])
         s = Sync(a.home, a.config, runner=runner)
