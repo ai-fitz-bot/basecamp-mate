@@ -93,7 +93,11 @@ Run `doctor` after setting up, and whenever a run fails. As the agent, follow th
    login. Name people by id or exact name: Basecamp hides other people's email addresses
    unless your login is an account admin, so an email often matches no one and a domain
    admits nobody.
-4. Read the printed config, then run the same command without `--dry-run`. It writes the
+4. Read the printed config, and the line after it that says whether this is a personal
+   account (you listen only to the captain) or a team account (everyone in the captain's
+   company may ask you things: `"participants": {"company": true}`). Pass
+   `--no-participants-company` or `--participants-company` only when the captain asks for
+   the other. Then run the same command without `--dry-run`. It writes the
    config, installs a 30-second timer (and removes the old event-listener service, if an
    earlier version installed one) and registers the wake check.
 5. Confirm with `python3 SYNC/sync.py behaviors C`: `chat-inbox`, `checkin-answering`,

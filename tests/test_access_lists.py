@@ -12,6 +12,7 @@ from test_notifications import NotifBase, NotifStub, PROJECT, note  # noqa: E402
 from test_assigned_todos import OTHER, AssignBase, AssignStub, todo  # noqa: E402
 from test_pings import PingBase, ping_line, reading  # noqa: E402
 from test_blocked import NEW, said  # noqa: E402
+import init_home  # noqa: E402
 import test_init  # noqa: E402
 
 COMPANY, ELSEWHERE = 4035191, 999  # the captain's company; another one
@@ -168,11 +169,73 @@ class Config(NotifBase):
 
 
 class Init(unittest.TestCase):
-    setUp, tearDown, init = test_init.InitTest.setUp, test_init.InitTest.tearDown, test_init.InitTest.init
+    """init's default: the captain only on a personal account, everyone in the company on a team account (others in the
+    captain's company); an existing config keeps its own; the flags override."""
+    tearDown, init = test_init.InitTest.tearDown, test_init.InitTest.init
 
-    def test_participants_company_flag(self):
-        self.assertEqual(self.init(participants_company=True).discover()[0]["participants"], {"company": True})
+    def setUp(self):
+        test_init.InitTest.setUp(self)
+        for p in self.stub.people:  # the agent's own person is in the captain's company: still a personal account
+            p["company"] = {"id": COMPANY, "name": "Cap"}
+
+    def team(self, **kw):
+        self.stub.people.append({"id": COLLEAGUE, "name": "Col", "client": False, "company": {"id": COMPANY}, **kw})
+
+    def test_a_personal_account_listens_to_the_captain_only(self):
+        self.init(dry=True).main()
+        self.assertNotIn("participants", json.loads(self.printed[0]))
+        self.assertIn("a personal account", self.printed[1])
+
+    def test_a_team_account_admits_the_company(self):
+        self.team()
+        self.init(dry=True).main()
+        self.assertEqual(json.loads(self.printed[0])["participants"], {"company": True})
+        self.assertIn("a team account", self.printed[1])
+        self.assertIn("--no-participants-company", self.printed[1])
+
+    def test_a_client_in_the_company_does_not_make_a_team(self):
+        self.team(client=True)
         self.assertNotIn("participants", self.init().discover()[0])
+
+    def test_the_flags_override_the_default(self):
+        self.team()
+        self.assertNotIn("participants", self.init(participants_company=False).discover()[0])
+        self.stub.people.pop()
+        self.assertEqual(self.init(participants_company=True).discover()[0]["participants"], {"company": True})
+
+    def test_an_existing_config_keeps_its_own(self):
+        self.init().main()  # a personal account then
+        self.team()
+        self.init().main()  # no --force needed: nothing differs
+        self.assertNotIn("participants", json.load(open(os.path.join(self.dir, "config.json"))))
+
+    def test_a_failed_people_read_listens_to_the_captain_only(self):
+        self.team()
+        real = self.stub.__call__
+
+        def failing(cmd, **kw):
+            if cmd[-2].startswith("/people.json"):
+                return SimpleNamespace(stdout=json.dumps({"ok": False, "error": "boom"}), stderr="", returncode=1)
+            return real(cmd, **kw)
+        self.stub = failing
+        self.init(dry=True).main()
+        self.assertNotIn("participants", json.loads(self.printed[0]))
+        self.assertIn("could not be read", self.printed[1])
+
+    def test_cli_flags(self):
+        seen = {}
+        real = init_home.Init.__init__
+
+        def spy(s, *a, **kw):
+            seen[len(seen)] = kw["participants_company"]
+            raise init_home.Refuse("stop")
+        init_home.Init.__init__ = spy
+        try:
+            for flag in ([], ["--participants-company"], ["--no-participants-company"]):
+                init_home.cli(["https://app.basecamp.com/1/projects/2", "--login", "f", "--home", self.home, *flag])
+        finally:
+            init_home.Init.__init__ = real
+        self.assertEqual(seen, {0: None, 1: True, 2: False})
 
 
 if __name__ == "__main__":

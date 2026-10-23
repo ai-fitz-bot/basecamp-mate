@@ -44,7 +44,9 @@ people the sync listens to besides the captain, as "people"; their input is rela
 with who wrote it, but only the captain decides or approves. --operator <person> (the same
 forms) names someone whose word authorizes the agent as the captain's does, as
 "operators"; --participants-project (anyone on the project who is not a client),
---participants-company (anyone in the captain's company in Basecamp) and
+--participants-company (anyone in the captain's company in Basecamp: the default for a new
+home on a team account, where others are in that company; --no-participants-company for
+the captain only; a re-run without either keeps an existing config's setting) and
 --participants-domain <domain> (anyone whose email is at it; Basecamp shows other people's
 emails only to account admins, so for most logins it admits nobody) admit participants,
 who may ask the agent things but whose word never authorizes it. Anyone else never reaches
@@ -240,13 +242,15 @@ class System:
 
 class Init:
     def __init__(self, url, login, home, captain=None, listen_to=(), operators=(), participants_project=False,
-                 participants_domains=(), participants_company=False, repo_map=(), create_missing=False, dry=False,
+                 participants_domains=(), participants_company=None, repo_map=(), create_missing=False, dry=False,
                  force=False, cards=True, assign_captain=True, todos=False, reports=False, every_line=False, checkins=None, releases=True, inbox=False,
                  session_alert=None, pings=False, assigned_todos=False, assigned_anywhere=False, assigned_cards=False, advisories=(), backup=None, chats=True, no_keyring=None,
                  blocked=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
         self.account, self.project = parse_url(url)
         self.login, self.home = login, os.path.abspath(home)
         self.captain_arg, self.listen_to, self.operator_args = captain, list(listen_to), list(operators)
+        # participants_company: True admits the captain's company, False never; None keeps an existing config's setting,
+        # and for a new home admits the company only on a team account.
         self.participants_project, self.participants_company = participants_project, participants_company
         self.participants_domains = sorted({str(d).strip().lower().lstrip("@") for d in participants_domains})
         bad = [d for d in self.participants_domains if "." not in d or "@" in d or " " in d]
@@ -287,6 +291,7 @@ class Init:
         self.run = runner
         self.system = system or System()
         self.sync_dir = sync_dir
+        self.notes = []  # what discover found worth saying, printed after the config
         self.out = out
         self.dir = os.path.join(self.home, "data", "basecamp-sync")
 
@@ -381,10 +386,15 @@ class Init:
             cfg["people"] = [captain] + sorted(set(listened) - {captain})
         if set(operators) - {captain}:
             cfg["operators"] = sorted(set(operators) - {captain})
-        if self.participants_project or self.participants_domains or self.participants_company:
+        company = self.participants_company
+        if company is None and self.existing() is not None:  # an existing home keeps its own
+            company = (self.existing().get("participants") or {}).get("company")
+        elif company is None:  # a new home: the captain only on a personal account, everyone in the company on a team one
+            company = self.team_account(people, captain, acting) or None
+        if self.participants_project or self.participants_domains or company not in (None, False):
             cfg["participants"] = {**({"project": True} if self.participants_project else {}),
                                    **({"domains": self.participants_domains} if self.participants_domains else {}),
-                                   **({"company": True} if self.participants_company else {})}
+                                   **({"company": company} if company not in (None, False) else {})}
             if self.participants_domains and not any(visible(p) for p in people if p.get("id") != acting):
                 self.out(f"warning: the login {self.login} sees no one else's email address on this project (Basecamp "
                          "shows them only to account admins), so --participants-domain admits nobody; use "
@@ -433,8 +443,8 @@ class Init:
         if self.backup:
             cfg["backup"] = self.backup
         blocked = {"reply": self.blocked} if isinstance(self.blocked, str) else {} if self.blocked is None else None
-        if self.blocked is None and os.path.exists(os.path.join(self.dir, "config.json")):
-            blocked = json.load(open(os.path.join(self.dir, "config.json"))).get("blocked")  # an existing home keeps its own
+        if self.blocked is None and self.existing() is not None:
+            blocked = self.existing().get("blocked")  # an existing home keeps its own
         if blocked not in (None, False):
             cfg["blocked"] = blocked
         if problems:
@@ -472,6 +482,43 @@ class Init:
         except Exception:
             pass
         return full
+
+    def existing(self):
+        """The home's config as it is now, or None for a new home."""
+        path = os.path.join(self.dir, "config.json")
+        if not os.path.exists(path):
+            return None
+        with open(path) as f:
+            return json.load(f)
+
+    def team_account(self, people, captain, acting):
+        """True on a team account: someone besides the captain and the login, not a client, is in the captain's company
+        in Basecamp. Reads the account's people a page at a time (/people.json), stopping at the first such person; a
+        failed read counts as a personal account (the narrower default), with a warning. Says which it found."""
+        def company(p):
+            return (p.get("company") or {}).get("id")
+        mine = next((company(p) for p in people if p.get("id") == captain and company(p) is not None), None)
+        found, page = None, 1
+        try:
+            while found is None and page <= 20:
+                batch = self.bc("api", "get", f"/people.json?page={page}") or []
+                if not batch:
+                    break
+                mine = mine if mine is not None else next((company(p) for p in batch if p.get("id") == captain), None)
+                found = next((p for p in batch if mine is not None and company(p) == mine and p.get("client") is not True
+                              and p.get("id") not in (captain, acting)), None)
+                page += 1
+        except Refuse as e:
+            self.notes.append(f"warning: the account's people could not be read ({e}); listening only to the captain")
+            return False
+        if found is None:
+            self.notes.append("a personal account (no one else is in the captain's company): the agent listens only to "
+                              "the captain; pass --participants-company to let everyone in the company ask it things")
+            return False
+        self.notes.append("a team account (others are in the captain's company): everyone in the company may ask the "
+                          'agent things ("participants": {"company": true}); pass --no-participants-company to listen '
+                          "only to the captain")
+        return True
 
     def find_captain(self, people, acting, problems):
         if self.captain_arg:
@@ -575,6 +622,8 @@ class Init:
             if not os.path.exists(os.path.join(self.dir, name)):
                 plan.append(f"create empty {os.path.join(self.dir, name)}")
         self.out(json.dumps(cfg, indent=1))
+        for note in self.notes:
+            self.out(note)
         if self.dry:
             plan += self.system.install_timer(*self.units(config_path), dry=True)
             plan += self.system.remove_service(unit_name(self.home) + "-listen", dry=True)
@@ -632,8 +681,12 @@ def cli(argv, **kw):
     ap.add_argument("--participants-project", action="store_true",
                     help="also relay what anyone on the project (not a client) writes to the agent, as questions whose "
                          "word never authorizes it")
-    ap.add_argument("--participants-company", action="store_true",
-                    help="the same for anyone whose Basecamp profile is in the captain's company")
+    ap.add_argument("--participants-company", action="store_true", default=None,
+                    help="the same for anyone whose Basecamp profile is in the captain's company (the default for a new "
+                         "home on a team account, where others are in that company)")
+    ap.add_argument("--no-participants-company", dest="participants_company", action="store_false",
+                    help="listen only to the captain and the named people, even on a team account (a re-run without "
+                         "either flag keeps an existing config's setting)")
     ap.add_argument("--participants-domain", action="append", default=[], metavar="DOMAIN",
                     help="the same for anyone whose email is at DOMAIN (repeatable); Basecamp shows other people's emails "
                          "only to account admins, so for most logins this admits nobody")

@@ -30,9 +30,11 @@ Setup walks you through everything, one question at a time:
    reads your chat questions, asks you for decisions as to-dos and answers check-ins. It
    reads its own Basecamp notifications every 30 seconds, so it notices what you write to
    it within about half a minute. Card tables, release announcements, Message Board
-   reports and Pings stay off unless you say yes. The agent listens only to you: anyone
-   else who @mentions, Pings or assigns it never reaches it, and gets a short automatic
-   reply instead (see "People the sync listens to" to change either).
+   reports and Pings stay off unless you say yes. The agent listens only to you on a
+   personal account, and to you and everyone in your company on a team account (only you
+   decide); anyone else who @mentions, Pings or assigns it never reaches it, and gets a
+   short automatic reply instead. The summary says which; see "People the sync listens to"
+   to change either.
 6. It turns on what the project needs, starts the background services, runs one test sync
    and tells you what is on.
 
@@ -143,9 +145,21 @@ makes no pending record, no inbox note and no 👀, whatever they write and wher
 they address the agent directly, the block is logged and, with `blocked` on, they get one
 short automatic reply (see "Blocked senders" below).
 
-By default the sync listens only to the captain. The agent acts with the captain's
-authority, so who else reaches it, and whose word counts, is widened only deliberately,
-in the config (or with `init`'s flags), in four ways:
+A config with no lists listens only to the captain. For a new home, `init` (and so
+`setup`) picks the default from the account: on a **personal account** (no one but the
+captain and the agent's login in the captain's Basecamp company) it listens only to the
+captain; on a **team account** (others in that company, clients aside) it also writes
+`"participants": {"company": true}`, so everyone in the company may ask the agent things,
+while only the captain (and operators) decide. It reads the account's people
+(`/people.json`, page by page, stopping at the first colleague) to tell, says which it
+found after the printed config, and listens only to the captain when that read fails.
+`--participants-company` or `--no-participants-company` overrides the default; a re-run
+of `init` or `setup` on an existing home keeps its config's setting, so an existing home
+never widens on its own. To change it later, edit `participants` in the config, or ask the
+agent to.
+
+The agent acts with the captain's authority, so who else reaches it, and whose word
+counts, is widened only deliberately, in the config (or with `init`'s flags), in four ways:
 
 - **Operators** (`operators`: person ids, `init --operator <person>`) are named people
   whose word authorizes the agent as the captain's does. They are listened to everywhere
@@ -1117,7 +1131,9 @@ standing in, a participant's Ping, `init`'s flags and `doctor`'s domain check;
 a Ping), `"participants": {"company"}` (a colleague heard and an outsider not, one read per
 person a run, the last company known standing in, an unknown company admitting no one and
 getting no automatic reply, a company by id, a colleague's assignment neither a request nor
-answered), `sync.py access` and `init --participants-company`;
+answered), `sync.py access`, and `init`'s account-aware default (a personal account the
+captain only, the agent's own person and a client not making a team, a team account the
+company, a failed read the captain only, an existing config kept, the flags overriding);
 `tests/test_blocked.py` covers blocked senders: a stranger's @mention in a relayed or
 unrelayed chat, a comment mention, a Ping and a notified assignment answered once in place
 and never relayed, once per person and conversation a day, never the captain, the agent or
