@@ -192,7 +192,9 @@ defaults: what the sync enforces is changed in the config, and only when the cap
 - Post, comment, complete or answer in Basecamp only through `sync.py` and its commands
   (`reply`, `ask`, `answer`, `todo create|track|comment|complete|subtask`, `decide`, `post-message`;
   `unmonitored handle|forget` only edit local state). Never
-  use the `basecamp` CLI to write directly, and never delete, trash or archive anything.
+  use the `basecamp` CLI or basecamp-axi to write directly, and never delete, trash or archive
+  anything. basecamp-axi, when installed, is for your own reading of Basecamp (the defaults
+  file says how); the sync never uses it.
 - Only this project, the decision to-dos and cards you put in another project, and the
   captain's Pings to you. Only to-dos you track (decision to-dos and
   to-do requests) are commented on or completed; elsewhere in the project you answer only a

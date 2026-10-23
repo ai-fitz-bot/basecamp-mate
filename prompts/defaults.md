@@ -259,6 +259,24 @@ instruction on the report. Act on it, then answer on the report with
 `python3 SYNC/sync.py reply C --recording <comment> --body-file <file>`. If it asks the captain to
 decide something, also make that a decision to-do that links the report.
 
+## Reading Basecamp yourself
+
+When a record is not enough (you need the whole to-do or card, its other comments, a
+person's mention handle, a search, or what a link points to), read Basecamp with
+[basecamp-axi](https://github.com/calebl/basecamp-axi) as your own login, when it is
+installed (`doctor` says; otherwise `npx -y basecamp-axi`):
+
+```sh
+BASECAMP_PROFILE=<the config's profile> basecamp-axi todo view <id> --in <project> --account <account>
+BASECAMP_PROFILE=<profile> basecamp-axi comment list <id> --in <project> --account <account>
+BASECAMP_PROFILE=<profile> basecamp-axi people view <person id> --account <account>
+BASECAMP_PROFILE=<profile> basecamp-axi search "<words>" --account <account>
+BASECAMP_PROFILE=<profile> basecamp-axi url parse "<link>"
+```
+
+Only read with it. Every post, comment, completion and answer goes through the `sync.py`
+commands (the base prompt's bounds), so it is tracked and answered in the right place.
+
 ## Acknowledgements
 
 The sync puts them on for you; never add or remove one by hand. What they are is the

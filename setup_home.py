@@ -445,6 +445,8 @@ class Setup:
                                      if company else "only you")
                  + ("; anyone else gets a short automatic reply" if cfg.get("blocked") not in (None, False)
                     else "; anyone else is ignored") + ". Ask the agent to change who it listens to.")
+        self.out("  Optional: basecamp-axi is " + ("installed, so the agent can read Basecamp with it." if self.which("basecamp-axi")
+                 else "not installed; with it the agent can read Basecamp itself (npm install -g basecamp-axi)."))
         self.out("To change any of this, run `basecamp-mate setup` again and give different answers.\n"
                  "If something stops working, run `basecamp-mate doctor`.")
         if not worked:

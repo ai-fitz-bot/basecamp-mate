@@ -26,6 +26,7 @@ from setup_home import MIN_BASECAMP, Basecamp, INSTALL_CLI, cli_version, default
 STALE_MINUTES = 20  # the timer logs at least every 5 minutes (the card mirror's slot); this many without a line: not running
 UNREAD_CAP = 100  # Basecamp lists at most this many unread notifications
 SETUP = "basecamp-mate setup"
+AXI_INSTALL = "npm install -g basecamp-axi, or run it with npx -y basecamp-axi"
 
 
 class Doctor:
@@ -96,6 +97,11 @@ class Doctor:
                 good = False
             else:
                 self.ok(f"Basecamp command-line tool {'.'.join(map(str, version))}")
+        # Optional: the agent's own reading of Basecamp; the sync itself never uses it.
+        if self.which("basecamp-axi"):
+            self.ok("basecamp-axi (optional), for the agent's own reading of Basecamp")
+        else:
+            self.skip(f"basecamp-axi is not installed (optional: the agent can use it to read Basecamp; {AXI_INSTALL})")
         try:
             r = self.system.systemctl("show-environment")
             sd = r.returncode == 0
