@@ -84,6 +84,7 @@ policy. Each does one thing to the configured account and project:
 | `sync.py todo show` | command | reads a tracked to-do as Basecamp has it now (open or not, due date, repetition rule), read-only |
 | `sync.py post-message` | command | posts a message (subject and body) on the configured message board |
 | `sync.py status` | command | lists the sync runs on this computer, what each watches and with which login, and any `sync.py` running unrecorded (see "One home per project and login") |
+| `sync.py access` | command | prints who gets through to the agent, and where; read-only (see "People the sync listens to") |
 | `sync.py unmonitored list\|handle\|forget` | command | lists the unmonitored-event keys, marks one handled with the owner's decision, or drops one so it is raised again |
 | inbox note | primitive | queues a note in a firstmate home's inbox through its `bin/fm-inbox.sh note --request-id` |
 | card, Message Board and boost primitives | primitive | create, update, move, assign and unassign a card; post a board message; add an acknowledgement boost |
@@ -144,7 +145,7 @@ short automatic reply (see "Blocked senders" below).
 
 By default the sync listens only to the captain. The agent acts with the captain's
 authority, so who else reaches it, and whose word counts, is widened only deliberately,
-in the config (or with `init`'s flags), in three ways:
+in the config (or with `init`'s flags), in four ways:
 
 - **Operators** (`operators`: person ids, `init --operator <person>`) are named people
   whose word authorizes the agent as the captain's does. They are listened to everywhere
@@ -153,10 +154,18 @@ in the config (or with `init`'s flags), in three ways:
   listens to as **participants**: every reader that relays the captain (chat lines,
   every-line chats, card, to-do, message and thread comments, mentions, boosts on every
   surface, Pings, to-do requests and unmonitored input) relays them too.
+- **People in one project** (`project_people`: `{"<project id>": [person ids]}`, by hand)
+  are named participants heard only where they write in that project: an outside person
+  invited to one project, say. Elsewhere, including Pings (a Ping is a bucket of its own,
+  not a project), they are not heard. With account-wide to-do requests (`"scope":
+  "account"`), a to-do they assign the agent in their project is a request; in any other
+  project it is not.
 - **Participants by rule** (`participants`: `{"project": true}`, `init
-  --participants-project`, and/or `{"domains": ["example.com"]}`, `init
-  --participants-domain <domain>`): anyone on the project who is not a client, or anyone
-  whose email address is at a listed domain. They may ask the agent things: their chat
+  --participants-project`, `{"company": true}`, `init --participants-company`, and/or
+  `{"domains": ["example.com"]}`, `init --participants-domain <domain>`): anyone on the
+  project who is not a client, anyone whose Basecamp profile is in the captain's company
+  (`{"company": <id>}` names another company), or anyone whose email address is at a
+  listed domain. They may ask the agent things: their chat
   lines (in a relayed chat), Pings, comments and @mentions are relayed as a participant's.
   Their boosts, to-do assignments and unmonitored input are not: a boost or an assignment
   reads as a decision, which a participant cannot make, and a whole project's unrelated
@@ -173,6 +182,17 @@ named lists are keyed on person ids, which every login sees. `init` warns, and `
 flags, domains that can admit nobody. The project's people are read once a run, only when
 someone not named writes, and kept in `participants.json`, whose last list stands in when
 that read fails.
+
+`"company"` works for every login: a person's company is on their Basecamp profile. It
+comes from the person object when Basecamp includes it, and otherwise from their person
+record (`/people/<id>.json`), read at most once a run per person; `companies.json` keeps
+the last company read for each person, and that stands in when a read fails. When there is
+none to fall back on, the company admits no one it cannot check, and that person gets no
+automatic reply either (a person with an unknown company is not known to be blocked).
+
+`sync.py access --home <home> --config <config.json>` prints who gets through, and where:
+the captain, operators, people, people per project, the rules, and whether blocked senders
+get the automatic reply. It only reads (each person's name).
 
 Every record says who wrote it (`author`: `id`, `name`), whether that is the captain
 (`captain`: true or false) and their `role` (`captain`, `operator` or `participant`), and
@@ -212,7 +232,9 @@ and conversation a day, and never for anything written before automatic replies 
 (`blocked.json`'s `since`, set on the first run with `blocked` on). The captain, the
 acting login and Basecamp's own senders are never answered, and lines and comments that do
 not address the agent get no reply. A to-do the assignment sweep finds is never answered:
-the sweep only guesses who assigned it (its creator); only a notification names them. With
+the sweep only guesses who assigned it (its creator); only a notification names them. Nor is
+a participant admitted by rule whose assignment is ignored: they are listened to, just not
+for assignments. With
 `blocked` on, the Ping reader reads every Ping the login is in, not only those with someone
 listened to, so a stranger's Ping can be answered. A failed reply is logged and not retried.
 Like every post, nothing is posted without a `profile`, as the owner, or in a dry run.
@@ -885,10 +907,12 @@ or by hand from
   none. See "People the sync listens to".
 - `people` (optional): the Basecamp person ids whose lines, comments and boosts are
   relayed, as participants; the captain is always included. Default: just the captain.
-- `participants` (optional): `{"project": true}` and/or `{"domains": ["<domain>", ...]}`:
-  also relay what anyone on the project (not a client), or with an email at a domain,
-  writes to the agent, as a participant's. Domains need a login that sees email addresses
-  (an account admin).
+- `project_people` (optional): `{"<project id>": [person ids]}`: named participants heard
+  only in that project. Default: none.
+- `participants` (optional): `{"project": true}`, `{"company": true | <company id>}` and/or
+  `{"domains": ["<domain>", ...]}`: also relay what anyone on the project (not a client), in
+  the captain's (or that) company, or with an email at a domain, writes to the agent, as a
+  participant's. Domains need a login that sees email addresses (an account admin).
 - `blocked` (optional): `{}` or `{"reply": "<text>"}`: someone the sync does not listen to who
   @mentions, Pings or assigns the agent gets one short automatic reply (the default text, or
   yours). Absent or `false`: no reply. Either way nothing they write reaches the agent. `init`
@@ -972,6 +996,7 @@ claim, in `~/.local/state/basecamp-mate/runs/`; see "One home per project and lo
 | `blocked.json` | the script | `since` (when automatic replies to blocked senders started) and, per person and conversation (`<person>:<bucket>:<thread>`), when the last automatic reply was posted (kept two days) |
 | `sync.lock` | the script | the shared state lock held by a timer run or a command |
 | `participants.json` | the script | the project's non-client person ids, as last read for `"participants": {"project": true}` |
+| `companies.json` | the script | person id -> their company id, as last read for `"participants": {"company"}` |
 | `todos.json` | the script | to-do key -> to-do id, title, URL, created and completed times, comment cursor, owner comments recorded, acknowledgement boosts queued and done, comments replied to; for a to-do request (`request-<id>`), also who assigned it (`request`), how many times it was assigned (`requests`), a digest of its name and description, the project it is in (`bucket`, `project_name`), and why it closed (`closed`) |
 | `assigned-todos.json` | the script | `ignored`: to-dos assigned to the acting login whose creator is not listened to, so the sweep fetches each once |
 | `sync.log` | the script | one line per action, plus a counts line per run |
@@ -1088,6 +1113,11 @@ decision, approval and to-do request authorizing, project members and email doma
 as participants (clients, strangers and masked emails not), never through boosts,
 assignments or unmonitored input, the project's people read once a run with its last list
 standing in, a participant's Ping, `init`'s flags and `doctor`'s domain check;
+`tests/test_access_lists.py` covers `project_people` (heard in their project only, never in
+a Ping), `"participants": {"company"}` (a colleague heard and an outsider not, one read per
+person a run, the last company known standing in, an unknown company admitting no one and
+getting no automatic reply, a company by id, a colleague's assignment neither a request nor
+answered), `sync.py access` and `init --participants-company`;
 `tests/test_blocked.py` covers blocked senders: a stranger's @mention in a relayed or
 unrelayed chat, a comment mention, a Ping and a notified assignment answered once in place
 and never relayed, once per person and conversation a day, never the captain, the agent or

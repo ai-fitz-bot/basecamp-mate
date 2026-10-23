@@ -65,9 +65,12 @@ Notifications need no flag (`--listen` is accepted and does nothing).
 second mate's home keeps `--assigned-todos`.
 `--listen-to <person id, email or name>` (repeatable) adds someone the sync listens to
 besides the captain (the config's `people`); `--operator <person>` adds someone whose word
-authorizes the agent as the captain's does (`operators`); `--participants-project` and
-`--participants-domain <domain>` let anyone on the project, or with an email at the
-domain, ask the agent things (`participants`). Add only what the owner names: widening
+authorizes the agent as the captain's does (`operators`); `--participants-project`,
+`--participants-company` and `--participants-domain <domain>` let anyone on the project,
+in the captain's company, or with an email at the domain, ask the agent things
+(`participants`). Someone heard in one project only goes in the config's `project_people`
+(`{"<project id>": [person ids]}`). `sync.py access` prints who gets through, and where.
+Add only what the owner names: widening
 trust is the owner's call. Prefer ids or exact names: Basecamp masks other people's email
 addresses unless the login is an account admin, so an email or a domain usually matches
 no one. Anyone else never reaches the agent: a new home gets `"blocked": {}`, so someone
@@ -303,7 +306,7 @@ The main firstmate's own home answers its questions itself rather than relaying.
 
 - Post, comment, complete, delete, archive or trash anything in Basecamp outside `sync.py`
   and its commands (`reply`, `ask`, `answer`, `todo create|track|comment|complete|subtask`,
-  `post-message`), or hand-edit `todos.json`, `pings.json`, `notifications.json`, `threads.json`, `timer.json`, `assigned-todos.json`, `participants.json`, `blocked.json` or `unmonitored.json`.
+  `post-message`), or hand-edit `todos.json`, `pings.json`, `notifications.json`, `threads.json`, `timer.json`, `assigned-todos.json`, `participants.json`, `companies.json`, `blocked.json` or `unmonitored.json`.
   The sync's automatic posts are a release announcement (releases only: GitHub releases
   of the repos in `releases`, never merges or PRs, Message Board only), the opt-in session
   alert, and, with `blocked` on, the short reply to a blocked sender. Never announce

@@ -43,7 +43,8 @@ sync mirrors from the backlog). --advisories
 people the sync listens to besides the captain, as "people"; their input is relayed
 with who wrote it, but only the captain decides or approves. --operator <person> (the same
 forms) names someone whose word authorizes the agent as the captain's does, as
-"operators"; --participants-project (anyone on the project who is not a client) and
+"operators"; --participants-project (anyone on the project who is not a client),
+--participants-company (anyone in the captain's company in Basecamp) and
 --participants-domain <domain> (anyone whose email is at it; Basecamp shows other people's
 emails only to account admins, so for most logins it admits nobody) admit participants,
 who may ask the agent things but whose word never authorizes it. Anyone else never reaches
@@ -239,14 +240,14 @@ class System:
 
 class Init:
     def __init__(self, url, login, home, captain=None, listen_to=(), operators=(), participants_project=False,
-                 participants_domains=(), repo_map=(), create_missing=False, dry=False,
+                 participants_domains=(), participants_company=False, repo_map=(), create_missing=False, dry=False,
                  force=False, cards=True, assign_captain=True, todos=False, reports=False, every_line=False, checkins=None, releases=True, inbox=False,
                  session_alert=None, pings=False, assigned_todos=False, assigned_anywhere=False, assigned_cards=False, advisories=(), backup=None, chats=True, no_keyring=None,
                  blocked=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
         self.account, self.project = parse_url(url)
         self.login, self.home = login, os.path.abspath(home)
         self.captain_arg, self.listen_to, self.operator_args = captain, list(listen_to), list(operators)
-        self.participants_project = participants_project
+        self.participants_project, self.participants_company = participants_project, participants_company
         self.participants_domains = sorted({str(d).strip().lower().lstrip("@") for d in participants_domains})
         bad = [d for d in self.participants_domains if "." not in d or "@" in d or " " in d]
         if bad:
@@ -380,9 +381,10 @@ class Init:
             cfg["people"] = [captain] + sorted(set(listened) - {captain})
         if set(operators) - {captain}:
             cfg["operators"] = sorted(set(operators) - {captain})
-        if self.participants_project or self.participants_domains:
+        if self.participants_project or self.participants_domains or self.participants_company:
             cfg["participants"] = {**({"project": True} if self.participants_project else {}),
-                                   **({"domains": self.participants_domains} if self.participants_domains else {})}
+                                   **({"domains": self.participants_domains} if self.participants_domains else {}),
+                                   **({"company": True} if self.participants_company else {})}
             if self.participants_domains and not any(visible(p) for p in people if p.get("id") != acting):
                 self.out(f"warning: the login {self.login} sees no one else's email address on this project (Basecamp "
                          "shows them only to account admins), so --participants-domain admits nobody; use "
@@ -630,6 +632,8 @@ def cli(argv, **kw):
     ap.add_argument("--participants-project", action="store_true",
                     help="also relay what anyone on the project (not a client) writes to the agent, as questions whose "
                          "word never authorizes it")
+    ap.add_argument("--participants-company", action="store_true",
+                    help="the same for anyone whose Basecamp profile is in the captain's company")
     ap.add_argument("--participants-domain", action="append", default=[], metavar="DOMAIN",
                     help="the same for anyone whose email is at DOMAIN (repeatable); Basecamp shows other people's emails "
                          "only to account admins, so for most logins this admits nobody")
@@ -692,7 +696,8 @@ def cli(argv, **kw):
         return 2
     try:
         Init(a.url, a.login, a.home, captain=a.captain, listen_to=a.listen_to, operators=a.operator,
-             participants_project=a.participants_project, participants_domains=a.participants_domain, repo_map=a.repo_map,
+             participants_project=a.participants_project, participants_domains=a.participants_domain,
+             participants_company=a.participants_company, repo_map=a.repo_map,
              create_missing=a.create_missing_columns, dry=a.dry_run, force=a.force,
              cards=not a.no_cards, assign_captain=not a.no_assign_captain, todos=a.todos, reports=a.reports, every_line=a.every_line,
              checkins=a.checkins, releases=not a.no_releases, inbox=a.inbox, session_alert=a.session_alert, pings=a.pings,

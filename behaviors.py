@@ -1139,7 +1139,7 @@ class Notifications(Behavior):
         rec, booster = bst.get("recording") or {}, bst.get("booster") or {}
         rid, rtype = rec.get("id"), recording_type(rec.get("type"))
         bucket, parent = str((rec.get("bucket") or {}).get("id") or ""), rec.get("parent") or {}
-        if not t.hears(booster, admitted=False):
+        if not t.hears(booster, admitted=False, bucket=bucket or None):
             return False, [], None
         on_todo = rid if rtype == "Todo" else parent.get("id") if rtype == "Comment" and parent.get("type") == "Todo" else None
         on_card = (rid if rtype == "Kanban::Card" else
