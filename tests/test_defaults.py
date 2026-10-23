@@ -10,6 +10,7 @@ import test_backup  # noqa: E402
 import test_sync  # noqa: E402
 import test_init  # noqa: E402
 import test_setup  # noqa: E402
+import behaviors  # noqa: E402
 import init_home  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,6 +32,38 @@ class Shipped(unittest.TestCase):
             self.assertNotIn(gone, base)
         self.assertIn("HOME/data/basecamp-sync/defaults.md", base)
         self.assertIn("## 4. Bounds", base)
+
+
+class Notes(unittest.TestCase):
+    """An inbox note says what happened, the facts and the commands; how to handle it is the home's defaults."""
+    RECORDS = [
+        {"kind": "chat-question", "line": 2, "text": "ship it?", "captain": True},
+        {"kind": "todo-comment", "key": "k", "comment": 3, "captain": True},
+        {"kind": "todo-request", "key": "request-4", "todo": 4, "captain": True, "due_on": "2026-11-01"},
+        {"kind": "todo-request-closed", "key": "request-4", "todo": 4, "reason": "unassigned", "captain": True},
+        {"kind": "unmonitored", "key": "comment.created/Document", "notification": 9, "captain": True},
+        {"kind": "advisory", "repo": "o/r", "ghsa": "GHSA-1", "state": "triage"},
+        {"kind": "dependabot-alert", "repo": "o/r", "number": 1, "severity": "high"},
+        {"kind": "checkin", "question": 5, "date": "2026-10-23", "captain": True},
+        {"kind": "mention", "comment": 6, "author": {"id": 1, "name": "Mate"}, "captain": False, "role": "participant"},
+    ]
+
+    def test_facts_and_commands_and_never_the_handling(self):
+        for rec in self.RECORDS:
+            body = behaviors.inbox_note(rec, "1", "2")[1]
+            self.assertIn("Handle it as this home's Basecamp defaults say (data/basecamp-sync/defaults.md)", body)
+            for advice in ("route", "file a to-do", "put it to the captain", "take it on", "act on it", "weigh",
+                           "tell the captain", "never create", "stop the work"):
+                self.assertNotIn(advice, body, (rec["kind"], advice))
+
+    def test_the_commands_and_facts_that_matter_stay(self):
+        notes = [behaviors.inbox_note(rec, "1", "2")[1] for rec in self.RECORDS]
+        self.assertIn("Commands: sync.py reply --recording 2 (answers in the chat).", notes[0])
+        self.assertIn("due 2026-11-01 as read now; Basecamp owns the date", notes[2])
+        self.assertIn("no longer tracked; there is nothing to complete", notes[3])
+        self.assertIn("sync.py unmonitored handle --key 'comment.created/Document'", notes[4])
+        self.assertIn("one answer a day", notes[7])
+        self.assertIn("their word never authorizes a decision or approval", notes[8])
 
 
 class Seed(unittest.TestCase):

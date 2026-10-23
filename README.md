@@ -688,7 +688,11 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   each run ends by delivering every record appended to `pending-comments.jsonl` since the
   last delivery as a note through `<fm_home>/bin/fm-inbox.sh note --request-id
   basecamp-<kind>-<id> --json -` (FM_HOME set to that home). The note body is short and
-  plain: what it is and who wrote it, the text, the Basecamp link and how to handle it.
+  plain: what it is and who wrote it, the text, the Basecamp link, the facts that matter
+  (whether their word authorizes, a due date Basecamp owns, a repeat Basecamp makes, a
+  closed request) and the commands that act on it. It never says how to handle it: that is
+  the home's `defaults.md` (see "The base prompt and the agent skill"), which the note
+  points to.
   The request id (the comment, line or boost id; question and date for a check-in) makes a
   replay return the original note rather than a new one. Records go in order from a
   line cursor in `inbox.json`; the first run starts after the records that existed
@@ -1153,8 +1157,8 @@ Done, `todo track --project`, the CLI flags, and notifications in another projec
 or handled for the decisions put there, a decision card's own event never unmonitored;
 `tests/test_defaults.py` covers the workflow defaults: the workflow moved from the base
 prompt into `prompts/defaults.md`, `init` copying it once and never overwriting a home's
-copy (a dry run only planning it), the backup keeping it and `doctor` flagging a home
-without it;
+copy (a dry run only planning it), the backup keeping it, `doctor` flagging a home
+without it, and inbox notes giving facts and commands but never the handling;
 `tests/test_access_lists.py` covers `project_people` (heard in their project only, never in
 a Ping), `"participants": {"company"}` (a colleague heard and an outsider not, one read per
 person a run, the last company known standing in, an unknown company admitting no one and

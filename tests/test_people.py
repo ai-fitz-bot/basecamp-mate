@@ -86,7 +86,7 @@ class Relay(ListenBase):
         [rec] = self.pending()
         self.assertEqual((rec["kind"], rec["captain"]), ("boost", False))
         _, body = behaviors.inbox_note(rec, "1", "2")
-        self.assertIn("never a captain decision or approval", body)
+        self.assertIn("never authorizes a decision or approval", body)
         self.assertNotIn("todo complete", body)
 
     def test_a_notification_from_another_listed_person_is_relayed_as_theirs(self):
@@ -160,7 +160,7 @@ class CardApprovals(Base):
         self.assertEqual((rec["kind"], rec["comment"], rec["author"], rec["captain"]), ("question", 5, named(MATE), False))
         _, body = behaviors.inbox_note(rec, "1", "2")
         self.assertIn("card question from Mate (not the captain)", body)
-        self.assertIn("never a captain decision", body)
+        self.assertIn("never authorizes a decision", body)
 
 
 class Pings(PingBase):
@@ -186,7 +186,7 @@ class Checkins(Base):
         _, body = behaviors.inbox_note({"kind": "checkin", "question": 5, "date": "2026-10-04", "title": "Run /stow",
                                         "author": named(MATE), "captain": False}, "1", "2")
         self.assertIn("asked by Mate (not the captain)", body)
-        self.assertIn("not a captain decision", body)
+        self.assertIn("never authorizes a decision", body)
 
 
 class Init(unittest.TestCase):

@@ -334,7 +334,7 @@ class AccountWideNotifications(AssignBase):
         [(rid, body, _, _)] = self.stub.notes
         self.assertEqual(rid, "basecamp-todo-request-42-1")
         self.assertIn(f"in project 'Project {OTHER}' ({OTHER})", body)
-        self.assertIn("route the work", body)
+        self.assertIn("it is in another project; comments and completion go there", body)
         self.assertEqual(self.stub.marked, [["10"]])
 
     def test_comments_and_closing_on_it_follow_it(self):
@@ -367,7 +367,7 @@ class Note(unittest.TestCase):
         _, body = behaviors.inbox_note({"kind": "todo-request", "key": "request-42", "todo": 42, "captain": False,
                                         "author": {"id": PARTNER, "name": "Pat"}}, "1", "2")
         self.assertIn("by Pat (not the captain)", body)
-        self.assertIn("never a captain decision", body)
+        self.assertIn("never authorizes a decision", body)
         _, body = behaviors.inbox_note({"kind": "todo-comment", "request": True, "key": "request-42", "title": "Rotate keys",
                                         "comment": 5, "captain": True}, "1", "2")
         self.assertIn("on to-do request 'Rotate keys' (request-42)", body)
@@ -559,9 +559,9 @@ class Scheduled(AssignBase):
         _, body = behaviors.inbox_note(rec, "1", "2")
         self.assertIn("next occurrence of a repeating to-do, asked for by the captain", body)
         self.assertIn(", due 2026-10-25, repeating every week on Sunday:", body)
-        self.assertIn("re-read it with sync.py todo show --todo request-43", body)
-        self.assertIn("not before when its description says so", body)
-        self.assertIn("never create it yourself", body)
+        self.assertIn("Basecamp owns the date and may move it (sync.py todo show --todo request-43", body)
+        self.assertIn("Basecamp makes the next occurrence, which arrives as a new request", body)
+        self.assertNotIn("not before", body)  # when to do it is the home's defaults, not the note's
         _, body = behaviors.inbox_note(dict(rec, repeats=None, follows=None), "1", "2")
         self.assertIn("assigned to you by the captain", body)
         self.assertNotIn("repeat", body)

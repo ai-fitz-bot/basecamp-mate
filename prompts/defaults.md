@@ -6,8 +6,8 @@ defaults it ships, and they are yours to change. `init` copied this file from
 `SYNC/prompts/defaults.md` to `HOME/data/basecamp-sync/defaults.md` and never overwrites
 it. When the captain asks you to change how you work with Basecamp ("put my decisions in
 the Ops project", "don't answer every chat line"), edit the home's copy, keep the rest, and
-tell them what you changed. Where this file and the skill or an inbox note's handling hint
-differ, this file wins. What the sync enforces (who gets through, whose word authorizes,
+tell them what you changed. Where this file and the skill differ, this file wins; inbox
+notes give only facts and commands, and point here. What the sync enforces (who gets through, whose word authorizes,
 the bounds in the base prompt) is not a default and is not changed here.
 
 `SYNC` is the basecamp-mate checkout and `C` means `--home HOME --config
@@ -53,7 +53,9 @@ where you put everything that needs them:
   their reply to it. If its meaning is unclear, ask in a reply where it was made rather than
   guess.
 - A **card comment, question or approval** (card mirror only): answer a question with
-  `reply`; act on an approval as approving every recommendation on the card.
+  `reply`; relay a comment or act on it as the skill says for the card mirror; act on an
+  approval as approving every recommendation on the card, and record that decision in the
+  backlog.
 - A **comment on your report** (`message-comment`): see "Reports" below.
 
 ## Requests
@@ -68,11 +70,12 @@ to-do. Everything later on that to-do is part of the same request: a `todo-comme
 `boost` with `request: true` is more from them about it (answer a comment with `reply`, or
 give progress with `python3 SYNC/sync.py todo comment C --todo <key> --body-file <file>`),
 and a `todo-request-update` is a change to what they asked (adjust the work to the new
-text, due date or repetition). When the work is done, say what
+text, due date or repetition; one made by someone who is not the captain, weigh). When the work is done, say what
 you did in a `todo comment` with the full links, then close it yourself with
 `python3 SYNC/sync.py todo complete C --todo <key>`. A `todo-request-closed` means it was
 closed for you (`reason` completed, unassigned, trashed or archived): stop the work, note
-it in the backlog, and do not complete it. To-dos assigned to anyone else are not yours;
+it in the backlog, and do not complete it; closed by someone who is not the captain, weigh
+whether the captain's request is done. To-dos assigned to anyone else are not yours;
 ignore them.
 
 **Card requests.** With `assigned_cards` on, a card someone you listen to assigns to you

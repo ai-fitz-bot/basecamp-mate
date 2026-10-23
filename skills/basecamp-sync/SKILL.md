@@ -31,8 +31,8 @@ means that checkout.
 works with Basecamp (where decisions go, what is answered and when, the decision to-do
 lifecycle, check-ins, reports, unmonitored input, advisories) is the home's own
 `data/basecamp-sync/defaults.md`, which `init` copies from `$SYNC/prompts/defaults.md` once
-and never overwrites. Read it and follow it; where it and this skill (or an inbox note's
-handling hint) differ, the home's defaults win. When the owner asks to change how the agent
+and never overwrites. Read it and follow it; where it and this skill differ, the home's
+defaults win. Inbox notes give only the facts and the commands, and point to it. When the owner asks to change how the agent
 works with Basecamp, edit that file, not the sync. The workflow this skill describes below
 is the shipped default.
 

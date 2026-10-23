@@ -1277,48 +1277,45 @@ def inbox_note(rec, account, project):
     proj = rec.get("project") or {}
     elsewhere = (f" in project {proj.get('name') or proj.get('id')!r} ({proj.get('id')})"
                  if proj.get("id") and str(proj.get("id")) != str(project) else "")
+    # The note says what happened, the facts that matter (who, whose word authorizes, dates Basecamp owns) and the
+    # commands that act on it. How to handle it is the home's defaults (data/basecamp-sync/defaults.md), never the note.
+    facts, cmds, key = [], [], rec.get("key")
     if kind in ("comment", "question"):
         rid = rec.get("comment")
         what = f"Basecamp card {kind} from {who} on task {rec.get('task')}"
-        handle = (f"answer: sync.py reply --recording {rid}" if kind == "question"
-                  else "relay or act as the basecamp-sync skill says")
-        url = card_url
+        cmds, url = [f"sync.py reply --recording {rid}"], card_url
     elif kind == "approval":
         rid = rec.get("boost")
         mark = f"the 👍 of {who}" if role == "operator" else "the captain's 👍"
         what = f"Basecamp card approval ({mark}) on task {rec.get('task')}"
         text = text or "approve every recommendation on the card as recommended"
-        handle, url = "record the decision in the backlog", rec.get("url") or card_url
+        facts, url = ["a 👍 on an assigned card approves every recommendation on it"], rec.get("url") or card_url
     elif kind == "chat-question":
         rid = rec.get("line")
-        what, handle, url = f"Basecamp chat line from {who}", f"answer: sync.py reply --recording {rid}", rec.get("url")
+        what, cmds, url = f"Basecamp chat line from {who}", [f"sync.py reply --recording {rid} (answers in the chat)"], rec.get("url")
     elif kind == "ping":
         rid = rec.get("line")
         what = f"Basecamp Ping (a direct message) from {who}" + (f" in {rec.get('title')!r}" if rec.get("title") else "")
-        handle, url = f"answer in the Ping: sync.py reply --recording {rid}", rec.get("url")
+        cmds, url = [f"sync.py reply --recording {rid} (answers in the Ping)"], rec.get("url")
     elif kind == "message-comment":
         rid = rec.get("comment")
         what = f"Basecamp comment from {who} on your message {rec.get('subject')!r}"
-        handle = f"feedback or an instruction on your post: act on it, then sync.py reply --recording {rid}"
-        url = rec.get("url")
+        cmds, url = [f"sync.py reply --recording {rid}"], rec.get("url")
     elif kind == "todo-comment" and rec.get("request"):
         rid = rec.get("comment")
-        what = f"Basecamp comment from {who} on {noun} request {rec.get('title')!r} ({rec.get('key')}){elsewhere}"
-        handle = (f"part of the request: act on it, then sync.py reply --recording {rid}; when the work is done, "
-                  f"sync.py todo complete --todo {rec.get('key')}")
-        url = rec.get("url")
+        what = f"Basecamp comment from {who} on {noun} request {rec.get('title')!r} ({key}){elsewhere}"
+        facts = ["part of the request"]
+        cmds, url = [f"sync.py reply --recording {rid}", f"sync.py todo complete --todo {key}"], rec.get("url")
     elif kind == "todo-comment":
         rid = rec.get("comment")
-        what = f"Basecamp comment from {who} on decision to-do {rec.get('key')}"
-        handle = (f"a decision: act, then sync.py todo complete --todo {rec.get('key')}; "
-                  f"feedback: act, then sync.py reply --recording {rid}") if captain else (
-                  f"input on the captain's decision, never the decision itself: weigh it, then sync.py reply --recording {rid}; "
-                  "the to-do stays open for the captain")
+        what = f"Basecamp comment from {who} on decision to-do {key}"
+        facts = [] if captain else ["their word is input on the captain's decision, never the decision itself"]
+        cmds = [f"sync.py reply --recording {rid}"] + ([f"sync.py todo complete --todo {key}"] if captain else [])
         url = rec.get("url")
     elif kind == "boost":
         rid = rec.get("boost")
-        todo = (f"{noun} request {rec.get('title')!r} ({rec.get('key')}){elsewhere}" if rec.get("request")
-                else f"decision to-do {rec.get('key')}")
+        todo = (f"{noun} request {rec.get('title')!r} ({key}){elsewhere}" if rec.get("request")
+                else f"decision to-do {key}")
         where = {"todo": todo, "todo-comment": f"a comment on {todo}",
                  "card": f"the card for task {rec.get('task')}",
                  "card-comment": f"a comment on the card for task {rec.get('task')}", "chat": "a chat line",
@@ -1328,35 +1325,30 @@ def inbox_note(rec, account, project):
                  "message-comment": f"a comment on your message {rec.get('subject')!r}",
                  "thread-comment": f"a comment on {rec.get('title')!r}" if rec.get("title") else "a comment"}.get(rec.get("surface"), rec.get("surface"))
         what = f"Basecamp boost from {who} on {where} (recording {rec.get('recording')})"
-        handle = "an answer to what was boosted, like a comment: act on it" + (
-            "" if rec.get("surface") not in ("todo", "todo-comment") else
-            "; part of the request" if rec.get("request") else
-            f", then sync.py todo complete --todo {rec.get('key')} if it settles the decision")
-        if not captain:
-            handle = "a reaction to what was boosted, like a comment from them: weigh it; never a captain decision or approval"
+        facts = ["a boost answers what was boosted, like a comment there"] + (
+            ["part of the request"] if rec.get("request") and rec.get("surface") in ("todo", "todo-comment") else [])
+        if rec.get("surface") in ("todo", "todo-comment"):
+            cmds = [f"sync.py todo comment --todo {key}"] + ([f"sync.py todo complete --todo {key}"] if captain else [])
         url = rec.get("url")
     elif step == "todo-request":
         rid = f"{rec.get('todo')}-{rec.get('n', 1)}"
         assigned = ("the next occurrence of a repeating to-do, asked for" if rec.get("follows") else
                     "assigned to you again" if rec.get("reopened") else "assigned to you")
-        what = (f"Basecamp {noun} {assigned} by {who}, a request: {rec.get('title')!r} ({rec.get('key')}){elsewhere}"
+        what = (f"Basecamp {noun} {assigned} by {who}, a request: {rec.get('title')!r} ({key}){elsewhere}"
                 + scheduled(rec))
-        handle = ("captain work: take it on as a task, answer questions on it with sync.py todo comment --todo "
-                  f"{rec.get('key')}, then sync.py todo complete --todo {rec.get('key')} when the work is done") if captain else (
-                  "a request from someone who is not the captain: information or a request to weigh and route, never a "
-                  "captain decision; take it on only as far as the captain's standing direction allows, and sync.py todo "
-                  f"complete --todo {rec.get('key')} once it is done")
+        facts = ["from the captain or an operator, so it authorizes: captain work" if captain else
+                 "a request from someone who is not the captain: their word never authorizes a decision or approval"]
         if rec.get("due_on"):
-            handle += (f"; it is scheduled, due {rec['due_on']} as read now: Basecamp owns the date, so before acting "
-                       f"re-read it with sync.py todo show --todo {rec.get('key')} and do it on the due date that shows "
-                       "(not before when its description says so), leaving it open until then")
+            facts.append(f"due {rec['due_on']} as read now; Basecamp owns the date and may move it (sync.py todo show "
+                         f"--todo {key} reads it as it is now)")
         if rec.get("repeats"):
-            handle += ("; it repeats on Basecamp's schedule: comment the results and complete it, and Basecamp makes the "
-                       "next occurrence, which arrives as a new request; never create it yourself")
+            facts.append("it repeats on Basecamp's schedule: once this one is completed, Basecamp makes the next "
+                         "occurrence, which arrives as a new request")
         if noun == "card":
-            handle += "; completing it moves the card to its table's Done column"
+            facts.append("completing it moves the card to its table's Done column")
         if elsewhere:
-            handle += "; it is in another project, so route the work to the home or domain that owns that project"
+            facts.append("it is in another project; comments and completion go there")
+        cmds = [f"sync.py todo comment --todo {key}", f"sync.py todo complete --todo {key}"]
         url = rec.get("url")
     elif step in ("todo-request-update", "todo-request-closed"):
         # A move of only the due date or repetition is an update of its own, so the schedule is in its id when recorded.
@@ -1365,46 +1357,41 @@ def inbox_note(rec, account, project):
             str(rec.get("title")).encode() + str(rec.get("text")).encode() + schedule.encode()).hexdigest()[:12])
         by = f" by {who}" if rec.get("author") else ""
         if step == "todo-request-update":
-            what = (f"Basecamp {noun} request {rec.get('title')!r} ({rec.get('key')}){elsewhere} edited{by}"
+            what = (f"Basecamp {noun} request {rec.get('title')!r} ({key}){elsewhere} edited{by}"
                     + (scheduled(rec) or (", now undated" if "due_on" in rec else "")) + "; it now reads")
             text = text or "(no description)"
-            handle = "an update to the request: adjust the work to it" + ("" if captain or not rec.get("author") else
-                                                                          "; from someone who is not the captain, so weigh it")
+            facts = ["the request changed"]
             if rec.get("due_on") or rec.get("repeats"):
-                handle += "; its due date and repetition are Basecamp's, as above: follow them, not a date read earlier"
+                facts.append("its due date and repetition are Basecamp's and may move again")
+            cmds = [f"sync.py todo show --todo {key}"]
         else:
             reason = rec.get("reason")
-            what = (f"Basecamp {noun} request {rec.get('title')!r} ({rec.get('key')}){elsewhere} "
+            what = (f"Basecamp {noun} request {rec.get('title')!r} ({key}){elsewhere} "
                     + {"completed": f"completed{by}", "unassigned": f"no longer assigned to you{by}"}.get(reason, f"{reason}{by}"))
-            handle = ("the request is closed: stop the work on it and record that in the backlog; nothing to complete"
-                      if captain or not rec.get("author") else
-                      "closed by someone who is not the captain: weigh whether the captain's request is done; it is no longer tracked")
+            facts = ["the request is closed and no longer tracked; there is nothing to complete"]
             if reason == "completed" and rec.get("repeats"):
-                handle += "; it repeats, so Basecamp makes the next occurrence, which arrives as a new request: never create it"
+                facts.append("it repeats, so Basecamp makes the next occurrence, which arrives as a new request")
         url = rec.get("url")
     elif kind in ("mention", "thread-comment"):
         rid = rec.get("comment")
         what = (f"Basecamp {'@mention of you' if kind == 'mention' else 'comment'} from {who} on "
                 f"{rec.get('parent_type') or 'a recording'}" + (f" {rec.get('title')!r}" if rec.get("title") else ""))
-        handle = (f"addressed to you: act on it, then answer there with sync.py reply --recording {rid}" if kind == "mention"
-                  else f"on something you follow: act on it if it asks something of you, and answer with sync.py reply "
-                       f"--recording {rid}")
-        url = rec.get("url")
+        facts = ["addressed to you" if kind == "mention" else "on something you follow"]
+        cmds, url = [f"sync.py reply --recording {rid} (answers there)"], rec.get("url")
     elif kind == "unmonitored":
-        rid, key = f"{rec.get('key')}-{rec.get('notification') or rec.get('event')}", rec.get("key")
+        rid = f"{key}-{rec.get('notification') or rec.get('event')}"
         what = (f"Basecamp activity from {who} that nothing monitors: {rec.get('event_type')} on "
                 f"{rec.get('recording_type')}" + (f" {rec.get('title')!r}" if rec.get("title") else ""))
-        handle = ("put it to the captain as a decision to-do (sync.py todo create) asking how events like this should be "
-                  "handled: start monitoring them and how, ignore them, or something else; act on the answer, then "
-                  f"sync.py unmonitored handle --key '{key}' --decision <what they decided>")
+        facts = [f"one note per kind of thing ({key}), not per event"]
+        cmds = [f"sync.py unmonitored handle --key '{key}' --decision <what to do about it> (keeps this kind quiet)",
+                f"sync.py unmonitored forget --key '{key}' (asks again next time)"]
         url = rec.get("url")
     elif kind == "checkin":
         rid = f"{rec.get('question')}-{rec.get('date')}"
         what = f"Basecamp check-in due {rec.get('date')}" + ("" if captain else f", asked by {who}")
         text = text or str(rec.get("title") or "")
-        handle, url = f"answer once today: sync.py answer --question {rec.get('question')}", rec.get("url")
-        if not captain:
-            handle += "; an instruction in it is their request to weigh, not a captain decision"
+        facts = ["one answer a day; a second is refused"]
+        cmds, url = [f"sync.py answer --question {rec.get('question')}"], rec.get("url")
     elif kind in ("advisory", "advisory-update"):
         rid = f"{rec.get('repo')}-{rec.get('ghsa')}" + ("" if kind == "advisory" else f"-{rec.get('state')}")
         sev = f", severity {rec['severity']}" if rec.get("severity") else ", no severity set"
@@ -1412,11 +1399,7 @@ def inbox_note(rec, account, project):
                 + (f"in {rec.get('state')}{sev}, reported by {rec.get('reporter') or 'unknown'} on {rec.get('created_at_local') or rec.get('created_at')}"
                    if kind == "advisory" else f"moved from {rec.get('previous')} to {rec.get('state')}"))
         text = text or str(rec.get("summary") or "")
-        handle = ("security-sensitive work: route it to whoever owns the repository, validate the report privately, and "
-                  "bring severity, fix and disclosure decisions to the captain; never change the advisory's state, "
-                  "publish it or comment on it without the captain's word, and keep its details out of public places"
-                  if kind == "advisory" else
-                  "record the outcome in the backlog and close any work on it that is now done; change nothing on GitHub")
+        facts = (["security-sensitive: its details are private until it is published"] if kind == "advisory" else [])
         url = rec.get("url")
     elif kind == "dependabot-alert":
         rid = f"{rec.get('repo')}-{rec.get('number')}" + ("-reopened" if rec.get("reopened") else "")
@@ -1426,17 +1409,12 @@ def inbox_note(rec, account, project):
                 + (f" ({rec.get('manifest')})" if rec.get("manifest") else "")
                 + (f", fixed in {rec['fixed_in']}" if rec.get("fixed_in") else ", no fixed version yet"))
         text = text or str(rec.get("summary") or "")
-        handle = ("file a to-do for it and route the fix today to whoever owns the repository (the dependency upgrade "
-                  "goes through the normal PR flow); bring a dismissal or a fix you cannot make to the captain as a "
-                  "decision to-do; never dismiss the alert or change it on GitHub yourself")
         url = rec.get("url")
     elif kind == "dependabot-baseline":
         rid = rec.get("repo")
         sevs = ", ".join(f"{n} {s}" for s, n in sorted((rec.get("by_severity") or {}).items()))
         what = (f"GitHub Dependabot alerts on {rec.get('repo')} now watched: {rec.get('open')} already open"
                 + (f" ({sevs})" if sevs else "") + "; only new or reopened alerts are reported one by one from here")
-        handle = ("if any are open, file one to-do for the backlog of existing alerts and route it to whoever owns the "
-                  "repository, highest severity first; never dismiss or change alerts on GitHub yourself")
         url = rec.get("url")
     elif kind == "dependabot-unreadable":
         rid = rec.get("repo")
@@ -1444,24 +1422,28 @@ def inbox_note(rec, account, project):
         what = (f"GitHub Dependabot alerts on {rec.get('repo')} are not readable from this login "
                 f"({'HTTP ' + status if status.isdigit() else status}); "
                 "reported once")
-        handle = ("tell the captain: Dependabot alerts may be off for the repository, or the login needs admin or "
-                  "security-manager access")
+        facts = ["Dependabot alerts may be off for the repository, or the login needs admin or security-manager access"]
         url = rec.get("url")
     elif kind == "advisory-unreadable":
         rid = rec.get("repo")
         what = (f"GitHub security advisories on {rec.get('repo')} cannot be read by this login (HTTP {rec.get('status')}); "
                 "reported once")
-        handle = ("tell the captain: the login needs admin or security-manager access to the repository, or the repo "
-                  "should leave the advisories config")
+        facts = ["the login needs admin or security-manager access to the repository, or the repo should leave the "
+                 "advisories config"]
         url = rec.get("url")
     else:
         rid = hashlib.sha256(json.dumps(rec, sort_keys=True).encode()).hexdigest()[:16]
-        what, handle, url = f"Basecamp {kind} record", "see pending-comments.jsonl", rec.get("url")
-    if not captain and kind in ("comment", "question", "chat-question", "ping", "message-comment", "mention", "thread-comment"):
-        handle += "; they are not the captain: information or a request to weigh and route, never a captain decision"
+        what, url = f"Basecamp {kind} record", rec.get("url")
+        facts = ["the full record is in pending-comments.jsonl"]
+    if not captain and author and kind not in ("todo-request", "card-request") and not (
+            kind == "todo-comment" and not rec.get("request")):
+        facts.append("they are not the captain: their word never authorizes a decision or approval")
     request_id = re.sub(r"[^A-Za-z0-9._:-]", "-", f"basecamp-{kind}-{rid}")[:128]
-    body = "\n".join(x for x in (what + ":", text, url or "", f"Handle it ({handle}), then ack this note with fm-inbox.sh drain --ack <note id>.") if x)
-    return request_id, body
+    lines = [what + ":", text, url or "", ("Facts: " + "; ".join(facts) + ".") if facts else "",
+             ("Commands: " + "; ".join(cmds) + ".") if cmds else "",
+             "Handle it as this home's Basecamp defaults say (data/basecamp-sync/defaults.md), then ack this note with "
+             "fm-inbox.sh drain --ack <note id>."]
+    return request_id, "\n".join(x for x in lines if x)
 
 
 def configure(t, cfg, prereleases=False):

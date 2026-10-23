@@ -139,7 +139,8 @@ class Advisories(Watched):
         [(rid, body, _, _)] = [n for n in self.stub.notes if "advisory" in n[0]]
         self.assertEqual(rid, "basecamp-advisory-acme-server-GHSA-aaaa-bbbb-cccc")
         self.assertIn("GitHub security advisory GHSA-aaaa-bbbb-cccc on acme/server in triage, severity high", body)
-        self.assertIn("never change the advisory's state, publish it or comment on it without the captain's word", body)
+        self.assertIn("security-sensitive: its details are private until it is published", body)
+        self.assertIn("as this home's Basecamp defaults say (data/basecamp-sync/defaults.md)", body)
 
 
 class DependabotAlerts(Watched):
@@ -217,7 +218,7 @@ class DependabotAlerts(Watched):
         [(rid, body, _, _)] = [n for n in self.stub.notes if "dependabot" in n[0]]
         self.assertEqual(rid, "basecamp-dependabot-alert-acme-server-1")
         self.assertIn("Dependabot alert 1 on acme/server, severity high: hono (package-lock.json), fixed in 4.6.5", body)
-        self.assertIn("file a to-do for it and route the fix today", body)
+        self.assertNotIn("file a to-do", body)  # the handling is the home's defaults, not the note's
 
 
 class Note(unittest.TestCase):

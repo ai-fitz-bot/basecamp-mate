@@ -102,7 +102,8 @@ The timer appends what it reads to `HOME/data/basecamp-sync/pending-comments.jso
 JSON record per line (`notifications` runs the reader for whatever the captain just wrote
 on the next 30-second run), and with `inbox-delivery` on it also delivers each new record as a
 note in your firstmate inbox. The inbox note is the wake: it says what the record is, who
-wrote it, the text, its link and how to handle it. Handle it as the defaults file says
+wrote it, the text, its link, the facts that matter (whose word authorizes, dates Basecamp
+owns) and the commands that act on it, never how to handle it. Handle it as the defaults file says
 (section 3), then acknowledge it with
 `HOME/bin/fm-inbox.sh drain --ack <note id>`. (Without `inbox-delivery`, the wake check
 fires when the file grows instead; handle each new line once, in order.) When you tell a
@@ -171,7 +172,7 @@ How you work with Basecamp is in `HOME/data/basecamp-sync/defaults.md`: where th
 captain, check-ins, unmonitored input, advisories and failures. `init` copies it from
 `SYNC/prompts/defaults.md` when the home has none and never overwrites it; if it is
 missing, copy that file there yourself. Read it now and follow it. It wins over the
-skill's and the inbox notes' handling hints.
+skill's handling hints; inbox notes give only facts and commands.
 
 When the captain asks you to change how you work with Basecamp, edit the home's
 `defaults.md` (only the part they asked about) and tell them what you changed. To see how
