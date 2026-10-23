@@ -99,9 +99,9 @@ class Operators(NotifBase):
         self.assertEqual([(r["author"]["id"], r["role"], r["captain"]) for r in (op, mate)],
                          [(OP, "operator", False), (MATE, "participant", False)])
         self.assertIn("(an operator: their word counts as the captain's)", note_of(op))
-        self.assertNotIn("never a captain decision", note_of(op))
+        self.assertNotIn("never authorizes", note_of(op))
         self.assertIn("(not the captain)", note_of(mate))
-        self.assertIn("never a captain decision", note_of(mate))
+        self.assertIn("never authorizes a decision", note_of(mate))
 
     def test_an_operators_comment_on_a_decision_todo_is_the_decision(self):
         tid = self.create()
@@ -109,7 +109,8 @@ class Operators(NotifBase):
         self.poll()
         [rec] = self.pending()
         self.assertEqual((rec["kind"], rec["role"]), ("todo-comment", "operator"))
-        self.assertIn("a decision: act, then sync.py todo complete --todo ta-x", note_of(rec))
+        self.assertIn("Commands: sync.py reply --recording 1; sync.py todo complete --todo ta-x.", note_of(rec))
+        self.assertNotIn("input on the captain's decision", note_of(rec))
 
     def test_without_operators_the_same_person_is_not_heard(self):
         self.cfg(operators=[], people=[])
@@ -159,7 +160,7 @@ class ProjectParticipants(NotifBase):
         [rec] = self.pending()
         self.assertEqual((rec["line"], rec["role"], rec["captain"]), (2, "participant", False))
         self.assertIn("(not the captain)", note_of(rec))
-        self.assertIn("never a captain decision", note_of(rec))
+        self.assertIn("never authorizes a decision", note_of(rec))
         self.assertEqual(self.stub.people_reads(), 1)  # once a run, however many unknown authors
 
     def test_no_people_read_while_only_named_people_write(self):
