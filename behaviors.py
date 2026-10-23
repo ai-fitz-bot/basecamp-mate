@@ -484,8 +484,9 @@ class DecisionTodos(Behavior):
     def __init__(self, t, cfg):
         super().__init__(t, cfg)
         todos = cfg.get("todos")
-        if todos is not None and not isinstance(todos, dict):
-            raise ValueError('config "todos" must be an object: {} or {"todoset": id} or {"list": id}')
+        if todos is not None and (not isinstance(todos, dict) or set(todos) - {"todoset", "list", "project"}):
+            raise ValueError('config "todos" must be an object: {}, {"todoset": id} or {"list": id}, '
+                             'with "project": id when they are in another project')
         self.on = todos is not None
 
     def run(self, items=None):
@@ -1063,6 +1064,10 @@ class Notifications(Behavior):
             return True, [f"ping {thread}"], None
         here, todos = bucket == t.project, t.load("todos.json", {})
         cards = b["assigned-cards"]
+        if path == "cards" and kind not in ("Comment", "Mention") and any(
+                rec.get("todo") == thread and rec.get("type") == "card" and not rec.get("request")
+                and str(rec.get("bucket") or t.project) == bucket for rec in todos.values()):
+            return True, [], None  # a decision card's own event (moved, completed): nothing to relay
         if path == "cards" and kind not in ("Comment", "Mention") and (
                 f"request-{thread}" in t.request_keys(cards=True)
                 or cards.on and (here or cards.account_wide) and not t.mirrored_card(thread, bucket)):
@@ -1078,14 +1083,15 @@ class Notifications(Behavior):
             if tracked or b["assigned-todos"].on and (here or b["assigned-todos"].account_wide):
                 want["requests"].setdefault(thread, (what, who.get("id"), None if here else bucket))
                 return True, [f"request {thread}"], None
-            if not here:
-                return False, [], None
+            if not here:  # another project's: this home's only when it is a decision to-do it put there
+                return any(rec.get("todo") == thread and str(rec.get("bucket")) == bucket for rec in todos.values()), [], None
             if any(rec.get("todo") == thread for rec in todos.values()) or not t.hears(who, admitted=False):
                 return True, [], None  # a decision to-do's own closing, or not from someone listened to
             return True, [], self.check(what, "Todo", thread, r)
         if not here:
-            keys = {k for k, rec in todos.items() if rec.get("request") and rec.get("todo") == thread and path in ("todos", "cards")
-                    and str(rec.get("bucket")) == bucket and not rec.get("completed") and not rec.get("closed")}
+            keys = {k for k, rec in todos.items() if rec.get("todo") == thread and path in ("todos", "cards")
+                    and str(rec.get("bucket")) == bucket and not rec.get("completed") and not rec.get("closed")
+                    and self.reads(rec)}
             if keys and kind in ("Comment", "Mention"):
                 want["todos"] |= keys
                 return True, ["todos"], None
@@ -1109,9 +1115,7 @@ class Notifications(Behavior):
                 return True, ["cards"], None
         if path in ("todos", "cards"):
             mine = {k: rec for k, rec in todos.items() if rec.get("todo") == thread}
-            keys = {k for k, rec in mine.items() if not rec.get("completed") and not rec.get("closed")
-                    and b["assigned-cards" if rec.get("type") == "card" else
-                          "assigned-todos" if rec.get("request") else "decision-todos"].on}
+            keys = {k for k, rec in mine.items() if not rec.get("completed") and not rec.get("closed") and self.reads(rec)}
             if keys:
                 want["todos"] |= keys
                 return True, ["todos"], None
@@ -1125,6 +1129,12 @@ class Notifications(Behavior):
             return True, [f"message {thread}"], after
         self.thread(want, bucket, thread, anchor, mention, THREADS.get(path), topic(r), stamp(r))
         return True, [f"thread {thread}"], None
+
+    def reads(self, rec):
+        """True when the behavior that owns tracked to-do `rec` is on: a card request's, a to-do request's, or (a decision
+        to-do or decision card) decision-todos'."""
+        return self.others["assigned-cards" if rec.get("request") and rec.get("type") == "card" else
+                           "assigned-todos" if rec.get("request") else "decision-todos"].on
 
     def thread(self, want, bucket, thread, anchor, mention, ptype, title, after=None):
         """Add thread `thread` to the threads to read: from its first unread comment `anchor`, `anchor` a mention or not,

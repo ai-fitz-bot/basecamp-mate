@@ -188,7 +188,8 @@ class Doctor:
         wants = [(c.get("chat") if isinstance(c, dict) else c, "chat") for c in cfg.get("chats") or []]
         if cfg.get("message_board"):
             wants.append((cfg["message_board"], "Message Board"))
-        if (cfg.get("todos") or {}).get("todoset"):
+        todos = cfg.get("todos") or {}
+        if todos.get("todoset") and str(todos.get("project") or cfg["project"]) == str(cfg["project"]):
             wants.append((cfg["todos"]["todoset"], "To-dos"))
         for q in (cfg.get("checkins") or {}).get("questionnaires", []):
             wants.append((q, "Automatic Check-ins"))

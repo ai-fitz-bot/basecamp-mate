@@ -78,8 +78,8 @@ policy. Each does one thing to the configured account and project:
 | `sync.py reply` | command | answers a recorded comment, chat line, Ping line, to-do comment, thread comment or mention where it was made, then removes the 👀 |
 | `sync.py ask` | command | posts a new chat line @mentioning the owner |
 | `sync.py answer` | command | answers a check-in question, once per question per day |
-| `sync.py todo create` | command | creates a to-do assigned to the owner, with a description, and tracks it under a key |
-| `sync.py todo track` | command | tracks an existing to-do under a key, without relaying its old comments |
+| `sync.py todo create` | command | creates a to-do assigned to the owner, with a description, and tracks it under a key: in the configured decisions project and list, or any project (`--project`), list (`--list`) or card table column (`--card-table --column`, a card) |
+| `sync.py todo track` | command | tracks an existing to-do (in any project, `--project`) under a key, without relaying its old comments |
 | `sync.py todo comment` | command | comments on a tracked to-do |
 | `sync.py todo complete` | command | completes a tracked to-do (a decision to-do, or a to-do request when the work is done) |
 | `sync.py todo subtask` | command | completes one native subtask (decision) of a multi-decision to-do; the to-do completes once all are done |
@@ -952,9 +952,13 @@ or by hand from
   including `run.sh`'s token refresh. Absent means the CLI's default login. It changes
   only who acts; `captain` stays the assignee and the only person whose 👍 approves, and
   the acting user's own comments and boosts are never relayed.
-- `todos` (optional): `{}`, `{"todoset": "<to-do set id>"}` or `{"list": "<to-do list id>"}`:
-  where `sync.py todo create` puts the owner's to-dos (loose on the set, or in the list);
-  turns on the to-do comment reader.
+- `todos` (optional): `{}`, `{"todoset": "<to-do set id>"}` or `{"list": "<to-do list id>"}`,
+  with `"project": <id>` when they are in another project of the account (default: the
+  configured project): where `sync.py todo create` puts the owner's to-dos by default
+  (loose on the set, or in the list); turns on the to-do comment reader. One decision can
+  go elsewhere with `todo create --project`, `--list` or `--card-table --column` (a card);
+  its comments, boosts, replies and completion then happen in that project, and its
+  notifications are this home's.
 - `message_board` (optional): the message board id `sync.py post-message` posts on; the
   owner's boosts on the agent's messages there are relayed.
 - `timezone` (optional): an IANA zone name (like `America/Chicago`) for the times the sync
@@ -1142,6 +1146,11 @@ decision, approval and to-do request authorizing, project members and email doma
 as participants (clients, strangers and masked emails not), never through boosts,
 assignments or unmonitored input, the project's people read once a run with its last list
 standing in, a participant's Ping, `init`'s flags and `doctor`'s domain check;
+`tests/test_decisions_anywhere.py` covers decisions anywhere: `todo create` in another
+project (its own to-do set, or the config's `todos` `project` and `list`), its subtasks,
+comments and completion there, a decision card in any column completed by moving it to
+Done, `todo track --project`, the CLI flags, and notifications in another project relayed
+or handled for the decisions put there, a decision card's own event never unmonitored;
 `tests/test_defaults.py` covers the workflow defaults: the workflow moved from the base
 prompt into `prompts/defaults.md`, `init` copying it once and never overwriting a home's
 copy (a dry run only planning it), the backup keeping it and `doctor` flagging a home

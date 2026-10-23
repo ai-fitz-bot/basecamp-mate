@@ -1836,19 +1836,24 @@ class Tools:
         if self.todos is None and not (requests and (self.assigned_todos or self.assigned_cards)):
             raise RuntimeError('config has no "todos"' + (' or "assigned_todos"' if requests else ""))
 
-    def todo_create(self, key, title, description="", todolist=None, due=None, subtasks=()):
-        """Create a to-do assigned to the owner and track it in todos.json under `key`.
+    def todo_create(self, key, title, description="", todolist=None, due=None, subtasks=(), project=None, card=None):
+        """Create a to-do (or a card) assigned to the owner and track it in todos.json under `key`.
 
         `subtasks` are the decisions when the to-do carries more than one, every one
         included: each becomes a native Basecamp subtask of the to-do (`basecamp
         subtasks`, CLI 0.12.0+), unassigned so the owner is notified once (by the parent), kept in the record in order,
         each completed by `todo_subtask`.
 
-        It goes loose on the configured to-do set ("todos": {"todoset": id}, or the
-        project's only one), or into a list (`todolist`, else "todos": {"list": id}).
-        The description is Markdown, rendered by the CLI. A key already tracked is
-        refused, so a re-run never creates a duplicate. Returns the to-do id, or None
-        when nothing was created.
+        It goes in `project` (any project of the account; default "todos": {"project": id}, else
+        the configured project): loose on the configured to-do set ("todos": {"todoset": id},
+        or the project's only one), or into a list (`todolist`, else "todos": {"list": id}).
+        The configured to-do set and list belong to the configured decisions project, so
+        another `project` takes only `todolist`. `card` ((card table id, column id)) makes it a
+        card in that column instead, assigned to the owner and tracked with "type": "card";
+        completing it moves it to the table's Done column. The record keeps its project
+        (`bucket`), so its comments, replies and completion go there. The description is
+        Markdown, rendered by the CLI. A key already tracked is refused, so a re-run never
+        creates a duplicate. Returns the to-do (or card) id, or None when nothing was created.
         """
         self.need_todos(requests=False)
         if not key or not title.strip():
@@ -1860,6 +1865,8 @@ class Tools:
             raise ValueError("a subtask needs text")
         if len(subtasks) == 1:
             raise ValueError("one decision needs no subtask: pass every decision as a subtask, or none")
+        if card and (subtasks or todolist or due):
+            raise ValueError("a card takes no subtasks, list or due date")
         with self.locked("todos.json"):
             have = self.load("todos.json", {}).get(key)
         if have is not None:
@@ -1867,27 +1874,35 @@ class Tools:
             return None
         if self.refused(f"todo create {key}", "owner"):
             return None
-        todolist = todolist or self.todos.get("list")
-        where = ["--list", str(todolist)] if todolist else ["--loose"] + (
-            ["--todoset", str(self.todos["todoset"])] if self.todos.get("todoset") else [])
+        home = str(self.todos.get("project") or self.project)  # where the configured to-do set and list are
+        bucket = str(project or home)
+        todolist = todolist or (self.todos.get("list") if bucket == home else None)
+        todoset = self.todos.get("todoset") if bucket == home else None
+        where = (["--card-table", str(card[0]), "--column", str(card[1])] if card else
+                 ["--list", str(todolist)] if todolist else ["--loose"] + (["--todoset", str(todoset)] if todoset else []))
         if self.dry:
-            self.log(f"dry todo create {key}: {' '.join(where)}, assigned to {self.captain}")
+            self.log(f"dry todo create {key}: {' '.join(where)} in project {bucket}, assigned to {self.captain}")
             return None
-        args = ["todos", "create", title.strip(), *where, "--assignee", str(self.captain)]
-        if description.strip():
-            args.append(f"--description={description.strip()}")
-        if due:
-            args += ["--due", due]
-        data = self.bc(*args) or {}
+        if card:
+            args = ["cards", "create", title.strip(), description.strip(), *where, "--assignee", str(self.captain)]
+        else:
+            args = ["todos", "create", title.strip(), *where, "--assignee", str(self.captain)]
+            if description.strip():
+                args.append(f"--description={description.strip()}")
+            if due:
+                args += ["--due", due]
+        data = self.bc(*args, project=bucket) or {}
         tid = data["id"]
         with self.locked("todos.json"):
             state = self.load("todos.json", {})
             state[key] = {"todo": tid, "title": title.strip(), "url": data.get("app_url"), "cursor": 0,
-                          "boost_counts": {}, "boost_seen": [], "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+                          "boost_counts": {}, "boost_seen": [], "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                          **({"bucket": int(bucket)} if bucket != str(self.project) else {}),
+                          **({"type": "card"} if card else {})}
             self.save_json("todos.json", state)
-        self.log(f"todo create {key}: todo {tid} {data.get('app_url') or ''}".rstrip())
+        self.log(f"todo create {key}: {'card' if card else 'todo'} {tid} in project {bucket} {data.get('app_url') or ''}".rstrip())
         for n, q in enumerate(subtasks, 1):  # recorded one by one, so the record matches Basecamp if one fails
-            sub = self.bc("subtasks", "create", str(tid), q["text"]) or {}
+            sub = self.bc("subtasks", "create", str(tid), q["text"], project=bucket) or {}
             with self.locked("todos.json"):
                 state = self.load("todos.json", {})
                 state[key].setdefault("subtasks", []).append(dict(q, id=sub["id"]))
@@ -1895,16 +1910,18 @@ class Tools:
             self.log(f"todo create {key}: subtask {n} {sub['id']}")
         return tid
 
-    def todo_track(self, key, tid):
-        """Track an existing to-do under `key`; its comments and boosts so far are not relayed. Writes nothing to Basecamp."""
+    def todo_track(self, key, tid, project=None):
+        """Track an existing to-do (in `project`, default the configured one) under `key`; its comments and boosts so far
+        are not relayed. Writes nothing to Basecamp."""
         self.need_todos(requests=False)
         with self.locked("todos.json"):
             state = self.load("todos.json", {})
             if key in state or any(r["todo"] == tid for r in state.values()):
                 self.log(f"todo track {key}: key or todo {tid} already tracked")
                 return False
-        todo = self.bc("api", "get", f"/buckets/{self.project}/todos/{tid}.json") or {}
-        comments = self.bc("comments", "list", str(tid)) or []
+        bucket = str(project or self.project)
+        todo = self.bc("api", "get", f"/buckets/{bucket}/todos/{tid}.json", project=bucket) or {}
+        comments = self.bc("comments", "list", str(tid), project=bucket) or []
         cursor = max([c.get("id", 0) for c in comments], default=0)
         if self.dry:
             self.log(f"dry todo track {key}: todo {tid}, cursor {cursor}")
@@ -1912,7 +1929,8 @@ class Tools:
         with self.locked("todos.json"):
             state = self.load("todos.json", {})
             state[key] = {"todo": tid, "title": todo.get("content"), "url": todo.get("app_url"), "cursor": cursor,
-                          "created": todo.get("created_at")}  # no boost state: the first read seeds it
+                          "created": todo.get("created_at"),  # no boost state: the first read seeds it
+                          **({"bucket": int(bucket)} if bucket != str(self.project) else {})}
             if todo.get("completed"):
                 state[key]["completed"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             self.save_json("todos.json", state)

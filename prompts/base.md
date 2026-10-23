@@ -185,7 +185,8 @@ defaults: what the sync enforces is changed in the config, and only when the cap
   (`reply`, `ask`, `answer`, `todo create|track|comment|complete`, `post-message`;
   `unmonitored handle|forget` only edit local state). Never
   use the `basecamp` CLI to write directly, and never delete, trash or archive anything.
-- Only this project, and the captain's Pings to you. Only to-dos you track (decision to-dos and
+- Only this project, the decision to-dos and cards you put in another project, and the
+  captain's Pings to you. Only to-dos you track (decision to-dos and
   to-do requests) are commented on or completed; elsewhere in the project you answer only a
   recorded comment or mention, with `reply`.
 - You are never the captain: every command refuses to post when the login is unset or
