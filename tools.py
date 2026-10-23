@@ -40,6 +40,9 @@ from zoneinfo import ZoneInfo
 
 THUMBS, EYES = "\U0001F44D", "\U0001F440"
 AUTHORITY = ("captain", "operator")  # the roles whose word authorizes the agent: a decision or an approval
+# When a scheduled request is done ("schedule" in the config, schedule.json per list): ask the owner, on its due date, or
+# before it.
+WHEN = ("ask", "due", "before")
 # The automatic reply to someone the sync does not listen to who addresses the agent ("blocked": {} in the config).
 BLOCKED_REPLY = "Sorry, I can't act on this: I only take requests from the people I work for. Please ask one of them to pass it on."
 
@@ -99,6 +102,12 @@ class Tools:
                 isinstance(blocked, dict) and set(blocked) <= {"reply"} and isinstance(blocked.get("reply", ""), str)):
             raise ValueError('config "blocked" must be false, {} or {"reply": "<the automatic reply>"}')
         self.blocked_reply = (blocked.get("reply") or "").strip() or BLOCKED_REPLY if isinstance(blocked, dict) else None
+        # "schedule": when a dated or repeating request is done by default; per list in schedule.json (`schedule_set`).
+        schedule = cfg.get("schedule")
+        if schedule is not None and not (isinstance(schedule, dict) and set(schedule) <= {"dated", "recurring"}
+                                         and all(v in WHEN for v in schedule.values())):
+            raise ValueError('config "schedule" must be {"dated": "ask"|"due"|"before", "recurring": "ask"|"due"|"before"}')
+        self.schedule = schedule or {}
         self.profile = cfg.get("profile")
         self.ask_chat = str(cfg["ask_chat"]) if cfg.get("ask_chat") is not None else None
         self.checkins = cfg.get("checkins")
@@ -1384,7 +1393,7 @@ class Tools:
             if [tid, EYES] not in [a[:2] for a in rec.get("acked", [])] + rec.get("ack", []):
                 rec.setdefault("ack", []).append([tid, EYES])
             self.record({"kind": "card-request" if card else "todo-request", "key": key, "todo": tid, "n": n, "reopened": n > 1 and prev is None,
-                         "follows": prev["todo"] if prev else None, **todo_schedule(todo),
+                         "follows": prev["todo"] if prev else None, **todo_schedule(todo), **self.timing(todo),
                          "title": todo.get("content"), "text": plain(todo.get("description")),
                          "assignees": [a.get("name") for a in todo.get("assignees") or []],
                          "url": todo.get("app_url"), "at": todo.get("updated_at") or todo.get("created_at"),
@@ -1469,7 +1478,7 @@ class Tools:
             out = {"kind": kind, "key": key, "todo": rec["todo"], "n": rec.get("requests", 1),
                    "title": todo.get("content") or rec.get("title"), "url": todo.get("app_url") or rec.get("url"),
                    "at": (todo.get("completion") or {}).get("created_at") or todo.get("updated_at"),
-                   "project": request_project(rec), **todo_schedule(todo), **authored}
+                   "project": request_project(rec), **todo_schedule(todo), **({} if reason else self.timing(todo)), **authored}
             if reason:
                 out["reason"] = reason
                 rec["closed"] = reason
@@ -1941,6 +1950,36 @@ class Tools:
             self.log(f"todo create {key}: subtask {n} {sub['id']}")
         return tid
 
+    def timing(self, todo):
+        """When scheduled request `todo` is done by default: {"when": "ask" | "due" | "before", "list": its list (or
+        card column)}. "recurring" applies to a repeating one, "dated" to one with only a due date: the answer remembered
+        for its list (schedule.json "lists"), else the remembered default (schedule.json "default"), else the config's
+        "schedule". {} for an undated to-do, or when nothing is set (the home's defaults then say)."""
+        sched = todo_schedule(todo)
+        if not sched["due_on"] and not sched["repeats"]:
+            return {}
+        which = "recurring" if sched["repeats"] else "dated"
+        lst = (todo.get("parent") or {}).get("id")
+        mem = self.load("schedule.json", {})
+        when = (((mem.get("lists") or {}).get(str(lst)) or {}).get(which) or (mem.get("default") or {}).get(which)
+                or self.schedule.get(which))
+        return {"when": when, "list": lst} if when else {}
+
+    def schedule_set(self, which, when, todolist=None):
+        """Remember when `which` ("dated" or "recurring") requests are done: `when` ("ask", "due" or "before") for
+        to-do list (or card column) `todolist`, or for every list without one of its own. Local state only
+        (schedule.json); the config's "schedule" stays the shipped default."""
+        if which not in ("dated", "recurring") or when not in WHEN:
+            raise ValueError(f"schedule: {which!r} must be dated or recurring, and {when!r} one of {', '.join(WHEN)}")
+        state = self.load("schedule.json", {})
+        if self.dry:
+            self.log(f"dry schedule: {which} requests {'in list ' + str(todolist) if todolist else 'by default'}: {when}")
+            return
+        target = state.setdefault("lists", {}).setdefault(str(todolist), {}) if todolist else state.setdefault("default", {})
+        target[which] = when
+        self.save_json("schedule.json", state)
+        self.log(f"schedule: {which} requests {'in list ' + str(todolist) if todolist else 'by default'}: {when}")
+
     def decide(self, on, question, comment, key=None, project=None, decider=None):
         """Put a decision to `decider` (default the captain) on the to-do or card it is about: a comment there (`comment`,
         Markdown) and a step on it (a native subtask asking `question`) assigned to them.
@@ -2134,7 +2173,7 @@ class Tools:
         out(json.dumps({"key": key, "todo": rec["todo"], "title": todo.get("content"), "text": plain(todo.get("description")),
                         "open": not todo.get("completed") and todo.get("status") in (None, "active"),
                         "assigned_to_you": me is not None and me in [p.get("id") for p in todo.get("assignees") or []],
-                        **todo_schedule(todo), "url": todo.get("app_url"),
+                        **todo_schedule(todo), **self.timing(todo), "url": todo.get("app_url"),
                         **({"subtasks": rec["subtasks"]} if rec.get("subtasks") else {})}, indent=1))
         return True
 

@@ -117,7 +117,9 @@ where the record was made, through `python3 SYNC/sync.py reply C --recording <id
   a to-do request, or, with `on` (its title), on a to-do or card you put a decision step on.
 - `decision-step-done`: the person asked to decide checked the decision step (`number`,
   `question`) you put on a to-do or card with `decide`.
-- `todo-request`: a to-do assigned to you, by `author`: a request.
+- `todo-request`: a to-do assigned to you, by `author`: a request. A scheduled one carries
+  `due_on` (and `repeats`), and, when the config has a `schedule`, `when` (`ask`, `due` or
+  `before`) and its `list`; `sync.py schedule set` remembers an answer per list.
 - `todo-request-update`, `todo-request-closed`: a to-do request was edited (its text, due
   date or repetition) or closed (`reason`).
 - `card-request`, `card-request-update`, `card-request-closed`: the same for a card assigned

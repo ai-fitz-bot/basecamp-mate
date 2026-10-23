@@ -449,6 +449,12 @@ class Init:
             blocked = self.existing().get("blocked")  # an existing home keeps its own
         if blocked not in (None, False):
             cfg["blocked"] = blocked
+        # With requests on, a new home asks the owner about a dated request's timing and does a repeating one on its due
+        # date; an existing home keeps its own (none: its defaults file's wording stands).
+        schedule = self.existing().get("schedule") if self.existing() is not None else (
+            {"dated": "ask", "recurring": "due"} if self.assigned_todos or self.assigned_cards else None)
+        if schedule:
+            cfg["schedule"] = schedule
         if problems:
             raise Refuse("init refused, nothing was written:\n  - " + "\n  - ".join(problems))
         gh_repos = {}

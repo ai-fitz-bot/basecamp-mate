@@ -359,7 +359,7 @@ class InitTest(unittest.TestCase):
 
     def test_assigned_todos_flag_turns_the_behavior_on(self):
         cfg, _ = self.init(assigned_todos=True).discover()
-        self.assertEqual(cfg, EXPECTED | {"assigned_todos": {}})
+        self.assertEqual(cfg, EXPECTED | {"assigned_todos": {}, "schedule": {"dated": "ask", "recurring": "due"}})
         self.assertNotIn("assigned_todos", self.init().discover()[0])
 
     def test_assigned_todos_anywhere_takes_them_account_wide(self):
