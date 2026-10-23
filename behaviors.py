@@ -1329,6 +1329,7 @@ def inbox_note(rec, account, project):
         todo = (f"{noun} request {rec.get('title')!r} ({key}){elsewhere}" if rec.get("request")
                 else f"decision to-do {key}")
         where = {"todo": todo, "todo-comment": f"a comment on {todo}",
+                 "subtask": f"step {rec.get('step')} ({rec.get('question')!r}) of {todo}",
                  "card": f"the card for task {rec.get('task')}",
                  "card-comment": f"a comment on the card for task {rec.get('task')}", "chat": "a chat line",
                  "ping": "a line in a Ping",
@@ -1339,7 +1340,11 @@ def inbox_note(rec, account, project):
         what = f"Basecamp boost from {who} on {where} (recording {rec.get('recording')})"
         facts = ["a boost answers what was boosted, like a comment there"] + (
             ["part of the request"] if rec.get("request") and rec.get("surface") in ("todo", "todo-comment") else [])
-        if rec.get("surface") in ("todo", "todo-comment"):
+        if rec.get("surface") == "subtask":
+            facts.append("a boost on a decision step is the answer to that decision")
+            cmds = [f"sync.py todo comment --todo {key}"] + (
+                [f"sync.py todo subtask --todo {key} --number {rec.get('step')}"] if captain else [])
+        elif rec.get("surface") in ("todo", "todo-comment"):
             cmds = [f"sync.py todo comment --todo {key}"] + ([f"sync.py todo complete --todo {key}"] if captain else [])
         url = rec.get("url")
     elif step == "todo-request":

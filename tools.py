@@ -108,6 +108,14 @@ class Tools:
                                          and all(v in WHEN for v in schedule.values())):
             raise ValueError('config "schedule" must be {"dated": "ask"|"due"|"before", "recurring": "ask"|"due"|"before"}')
         self.schedule = schedule or {}
+        # "acknowledge": the boost put on what is read ("read", every item), and on a deciding comment once the decision
+        # is carried out ("decided"). Absent: today's 👀 on a question and 👍 on anything else, nothing after deciding.
+        ack = cfg.get("acknowledge")
+        if ack is not None and not (isinstance(ack, dict) and set(ack) <= {"read", "decided"}
+                                    and all(isinstance(v, str) and v.strip() or v is False for v in ack.values())):
+            raise ValueError('config "acknowledge" must be {"read": "<emoji>", "decided": "<emoji>" or false}')
+        self.ack_read = ((ack or {}).get("read") or "").strip() or None
+        self.ack_decided = ((ack or {}).get("decided") or "").strip() or None
         self.profile = cfg.get("profile")
         self.ask_chat = str(cfg["ask_chat"]) if cfg.get("ask_chat") is not None else None
         self.checkins = cfg.get("checkins")
@@ -316,6 +324,11 @@ class Tools:
             self.log(f"{what}: acting user is the {who} or unset, not posting")
             return True
         return False
+
+    def read_ack(self, question=True):
+        """The boost that says an item was read: the config's "acknowledge" "read" on everything, else 👀 on a question
+        (an @mention, a Ping or chat question, a request) and 👍 ("got it") on anything else."""
+        return self.ack_read or (EYES if question else THUMBS)
 
     def acknowledge(self, key, rec, bucket=None):
         """Boost each queued recording (an owner comment or line, or the card for an approval) once.
@@ -595,7 +608,7 @@ class Tools:
                 kind = "question" if "?" in html.unescape(text) else "comment"
                 self.record({"kind": kind, "task": task, "repo": repo, "card": rec["card"], "comment": cid,
                              "at": c.get("created_at"), "text": text, **self.author(c.get("creator"))})
-                rec.setdefault("ack", []).append([cid, EYES if kind == "question" else THUMBS])
+                rec.setdefault("ack", []).append([cid, self.read_ack(kind == "question")])
                 self.log(f"new captain {kind} on {key}: {cid}")
         self.read_boosts(rec, "card-comment", {"task": task, "repo": repo, "card": rec["card"]},
                          counted=boost_items(comments))
@@ -700,13 +713,13 @@ class Tools:
                     continue
                 if self.dry:
                     self.log(f"dry chat {chat}: captain question {lid}")
-                    self.acknowledge(f"chat {chat}", dict(rec, ack=[*rec.get("ack", []), [lid, EYES]]))
+                    self.acknowledge(f"chat {chat}", dict(rec, ack=[*rec.get("ack", []), [lid, self.read_ack()]]))
                     continue
                 self.record({"kind": "chat-question", "chat": int(chat), "line": lid,
                              "url": ln.get("app_url") or f"https://3.basecamp.com/{self.account}/buckets/{self.project}/chats/{chat}@{lid}",
                              "text": text, "at": ln.get("created_at"), **self.author(ln.get("creator"))})
                 rec.setdefault("lines", []).append(lid)
-                rec.setdefault("ack", []).append([lid, EYES])
+                rec.setdefault("ack", []).append([lid, self.read_ack()])
                 self.log(f"new captain chat question in {chat}: {lid}")
             self.read_boosts(rec, "chat", {"chat": int(chat)},
                              counted=boost_items(lines))
@@ -1029,7 +1042,7 @@ class Tools:
                                  "comment": cid, "question": question, "url": c.get("app_url") or m.get("app_url"),
                                  "text": text, "at": c.get("created_at"), **self.author(c.get("creator"))})
                     post.setdefault("comments", []).append(cid)
-                    post.setdefault("ack", []).append([cid, EYES if question else THUMBS])
+                    post.setdefault("ack", []).append([cid, self.read_ack(question)])
                     self.log(f"new owner comment on message {m['id']}: {cid}")
                 self.acknowledge(f"message {m['id']}", post)
                 if not self.dry:
@@ -1089,7 +1102,7 @@ class Tools:
                     text = html.unescape(re.sub(r"<[^>]+>", " ", c.get("content", "")))
                     text = re.sub(r"\s+", " ", text).strip()
                     question = "?" in text
-                    rec.setdefault("ack", []).append([cid, EYES if question else THUMBS])
+                    rec.setdefault("ack", []).append([cid, self.read_ack(question)])
                     if self.dry:
                         self.log(f"dry todo {key}: owner comment {cid}")
                         continue
@@ -1099,6 +1112,8 @@ class Tools:
                                  **({"on": rec.get("title")} if rec.get("on") else {}),
                                  **self.author(c.get("creator"), rec.get("bucket"))})
                     rec.setdefault("comments", []).append(cid)
+                    if not rec.get("request") and self.role(c.get("creator"), bucket=rec.get("bucket")) in AUTHORITY:
+                        rec.setdefault("deciding", []).append(cid)  # acknowledged as decided once it is carried out
                     self.log(f"new owner comment on todo {key}: {cid}")
                 self.read_todo_boosts(key, rec, comments)
                 self.read_steps(key, rec)
@@ -1137,9 +1152,14 @@ class Tools:
             self.log(f"todo {key}: decision step {n} checked by {who.get('id')}")
 
     def read_todo_boosts(self, key, rec, comments):
-        """The owner's boosts on the to-do (read every run) and on its comments (when their count changes)."""
+        """The owner's boosts on the to-do (read every run), on each open subtask or decision step (read every run: a
+        boost there answers that decision), and on its comments (when their count changes)."""
         ctx, bucket = {"key": key, "todo": rec["todo"], **request_fields(rec)}, rec.get("bucket")
         self.read_boosts(rec, "todo", ctx, always=[(rec["todo"], rec.get("url"))], bucket=bucket)
+        for n, q in enumerate(rec.get("subtasks") or [], 1):
+            if not q.get("done") and q.get("id"):
+                self.read_boosts(rec, "subtask", dict(ctx, step=n, question=q.get("text")),
+                                 always=[(q["id"], rec.get("url"))], bucket=bucket)
         self.read_boosts(rec, "todo-comment", ctx, bucket=bucket,
                          counted=boost_items(comments))
 
@@ -1233,7 +1253,7 @@ class Tools:
                              "text": html.unescape(re.sub(r"<[^>]+>", "", ln.get("content", ""))).strip(),
                              "at": ln.get("created_at"), **self.author(ln.get("creator"), bucket)})
                 rec.setdefault("lines", []).append(lid)
-                rec.setdefault("ack", []).append([lid, EYES])
+                rec.setdefault("ack", []).append([lid, self.read_ack()])
                 self.log(f"new owner ping line in {chat}: {lid}")
             self.read_boosts(rec, "ping", {"bucket": int(bucket), "chat": int(chat)}, bucket=bucket,
                              counted=boost_items(lines))
@@ -1390,8 +1410,8 @@ class Tools:
                 rec["type"] = "card"
             if prev_key is not None and prev_key != key:
                 state[prev_key]["next"] = tid
-            if [tid, EYES] not in [a[:2] for a in rec.get("acked", [])] + rec.get("ack", []):
-                rec.setdefault("ack", []).append([tid, EYES])
+            if [tid, self.read_ack()] not in [a[:2] for a in rec.get("acked", [])] + rec.get("ack", []):
+                rec.setdefault("ack", []).append([tid, self.read_ack()])
             self.record({"kind": "card-request" if card else "todo-request", "key": key, "todo": tid, "n": n, "reopened": n > 1 and prev is None,
                          "follows": prev["todo"] if prev else None, **todo_schedule(todo), **self.timing(todo),
                          "title": todo.get("content"), "text": plain(todo.get("description")),
@@ -1525,7 +1545,7 @@ class Tools:
                      "url": ln.get("app_url") or f"https://3.basecamp.com/{self.account}/buckets/{bucket}/chats/{chat}@{rid}",
                      "text": plain(ln.get("content")), "at": ln.get("created_at"), **self.author(ln.get("creator"))})
         rec.setdefault("lines", []).append(rid)
-        rec.setdefault("ack", []).append([rid, EYES])
+        rec.setdefault("ack", []).append([rid, self.read_ack()])
         self.log(f"new owner mention in chat {chat}: {rid}")
         self.acknowledge(f"chat {chat}", rec)
         self.save_json("chats.json", state)
@@ -1593,7 +1613,7 @@ class Tools:
                          "question": "?" in text, "url": c.get("app_url") or on.get("app_url"), "text": text,
                          "at": c.get("created_at"), **self.author(c.get("creator"))})
             rec.setdefault("comments", []).append(cid)
-            rec.setdefault("ack", []).append([cid, EYES if mention or "?" in text else THUMBS])
+            rec.setdefault("ack", []).append([cid, self.read_ack(mention or "?" in text)])
             self.log(f"new owner {'mention' if mention else 'comment'} on {rec.get('parent_type') or 'thread'} {thread}: {cid}")
         self.read_boosts(rec, "thread-comment", {"bucket": int(bucket), "parent": thread, "title": rec.get("title")},
                          bucket=bucket, counted=boost_items(comments))
@@ -1808,9 +1828,36 @@ class Tools:
         return True
 
     def remove_eyes(self, rid, bucket=None):
-        for b in self.boosts_by(self.acting_id(), rid, EYES, bucket):
+        """Take the acting user's read acknowledgement (👀, or the config's "acknowledge" "read") off `rid`."""
+        emoji = self.read_ack()
+        for b in self.boosts_by(self.acting_id(), rid, emoji, bucket):
             self.bc("api", "delete", f"/buckets/{bucket or self.project}/boosts/{b.get('id')}.json")
-            self.log(f"reply {rid}: removed {EYES} boost {b.get('id')}")
+            self.log(f"reply {rid}: removed {emoji} boost {b.get('id')}")
+
+    def acknowledge_decided(self, key):
+        """With "acknowledge" "decided" set, boost each deciding comment on tracked `key` (the captain's or an operator's
+        comment on a decision to-do or a to-do or card a decision step is on) with it, once, and take the read
+        acknowledgement off: the decision was carried out. Run by `todo complete` and `todo subtask`."""
+        if not self.ack_decided:
+            return
+        with self.locked("todos.json"):
+            state = self.load("todos.json", {})
+            rec = state.get(key) or {}
+            done = [a[0] for a in rec.get("acked", []) if a[1:2] == [self.ack_decided]]
+            todo = [cid for cid in rec.get("deciding", []) if cid not in done]
+            if not todo:
+                return
+            for cid in todo:
+                if [cid, self.ack_decided] not in rec.setdefault("ack", []):
+                    rec["ack"].append([cid, self.ack_decided])
+            self.acknowledge(f"todo {key}", rec, rec.get("bucket"))
+            self.save_json("todos.json", state)
+        for a in rec.get("acked", []):
+            if a[1:2] == [self.ack_decided] and a[0] in todo and self.ack_decided != self.read_ack():
+                try:
+                    self.remove_eyes(a[0], rec.get("bucket"))
+                except RuntimeError as e:
+                    self.log(f"todo {key}: removing the read acknowledgement from {a[0]} failed: {e}")
 
     def owner_mention(self):
         """The owner's mention attachment, from their person record's sgid."""
@@ -2131,6 +2178,7 @@ class Tools:
             state[key]["completed"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             self.save_json("todos.json", state)
         self.log(f"todo complete {key}: completed todo {rec['todo']}")
+        self.acknowledge_decided(key)
         return True
 
     def todo_subtask(self, ref, number):
@@ -2161,6 +2209,8 @@ class Tools:
         self.log(f"todo subtask {key} {number}: done, {left} left on todo {rec['todo']}")
         if not left and not rec.get("request"):
             self.todo_complete(key)
+        else:
+            self.acknowledge_decided(key)
         return True
 
     def todo_show(self, ref, out=print):

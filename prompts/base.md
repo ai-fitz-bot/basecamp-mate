@@ -164,10 +164,13 @@ where the record was made, through `python3 SYNC/sync.py reply C --recording <id
   running, so this home reads nothing until one stops (`basecamp-mate status` lists them);
   never set `"allow_duplicate"` on your own.
 
-The timer acknowledges each record for you: 👀 on a question ("looking into it", removed
-when `reply` answers it) and 👍 on anything else ("got it"). Never add or remove those by
-hand. It also marks your login's Basecamp notifications read once their records are
-written.
+The timer acknowledges each record for you: with the config's `acknowledge` `read` (a new
+home: 👀), that boost on everything it reads; without it, 👀 on a question ("looking into
+it") and 👍 on anything else ("got it"). `reply` takes the read boost off once it answers.
+With `acknowledge` `decided` (a new home: 👍), `todo complete` and `todo subtask` put it on
+each deciding comment (the captain's or an operator's) once the decision is carried out,
+and take the read boost off. Never add or remove those by hand. It also marks your login's
+Basecamp notifications read once their records are written.
 
 ## 3. Defaults
 
