@@ -114,7 +114,9 @@ where the record was made, through `python3 SYNC/sync.py reply C --recording <id
 (or the to-do commands for a tracked to-do). By `kind`:
 
 - `todo-comment`: the captain commented on a decision to-do, or, with `request: true`, on
-  a to-do request.
+  a to-do request, or, with `on` (its title), on a to-do or card you put a decision step on.
+- `decision-step-done`: the person asked to decide checked the decision step (`number`,
+  `question`) you put on a to-do or card with `decide`.
 - `todo-request`: a to-do assigned to you, by `author`: a request.
 - `todo-request-update`, `todo-request-closed`: a to-do request was edited (its text, due
   date or repetition) or closed (`reason`).
@@ -183,7 +185,7 @@ defaults: what the sync enforces is changed in the config, and only when the cap
 ## 4. Bounds
 
 - Post, comment, complete or answer in Basecamp only through `sync.py` and its commands
-  (`reply`, `ask`, `answer`, `todo create|track|comment|complete`, `post-message`;
+  (`reply`, `ask`, `answer`, `todo create|track|comment|complete|subtask`, `decide`, `post-message`;
   `unmonitored handle|forget` only edit local state). Never
   use the `basecamp` CLI to write directly, and never delete, trash or archive anything.
 - Only this project, the decision to-dos and cards you put in another project, and the

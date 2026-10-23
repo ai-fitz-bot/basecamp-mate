@@ -122,7 +122,14 @@ and release the hold here as usual.
 
 ## Decisions as to-dos
 
-With `todos` on, put each item waiting on the captain (a decision, approval, merge call,
+A decision about an existing to-do or card goes on it by default: `python3 $SYNC/sync.py
+decide --home <home> --config <config> --on <to-do or card id or URL> --question "<plain
+question>" --body-file <comment> [--key <key>]` comments there and adds a step assigned to
+the decider (the captain, or an operator with `--decider`); their comments and boosts there
+and their checking the step (`decision-step-done`) come back, and `todo subtask` closes the
+step once it is carried out. The to-do or card itself is never completed for them.
+
+With `todos` on, put each other item waiting on the captain (a decision, approval, merge call,
 credential or login) to them as one to-do instead:
 `python3 $SYNC/sync.py todo create --home <home> --config <config> --key <stable key> --title "<plain question>" --body-file <file>`,
 with a Markdown description of the evidence, consequence, options, recommendation and the
@@ -314,7 +321,7 @@ The main firstmate's own home answers its questions itself rather than relaying.
 ## Never
 
 - Post, comment, complete, delete, archive or trash anything in Basecamp outside `sync.py`
-  and its commands (`reply`, `ask`, `answer`, `todo create|track|comment|complete|subtask`,
+  and its commands (`reply`, `ask`, `answer`, `todo create|track|comment|complete|subtask`, `decide`,
   `post-message`), or hand-edit `todos.json`, `pings.json`, `notifications.json`, `threads.json`, `timer.json`, `assigned-todos.json`, `participants.json`, `companies.json`, `blocked.json` or `unmonitored.json`.
   The sync's automatic posts are a release announcement (releases only: GitHub releases
   of the repos in `releases`, never merges or PRs, Message Board only), the opt-in session
