@@ -70,7 +70,10 @@ authorizes the agent as the captain's does (`operators`); `--participants-projec
 domain, ask the agent things (`participants`). Add only what the owner names: widening
 trust is the owner's call. Prefer ids or exact names: Basecamp masks other people's email
 addresses unless the login is an account admin, so an email or a domain usually matches
-no one. Never pass `--force` or `--create-missing-columns`
+no one. Anyone else never reaches the agent: a new home gets `"blocked": {}`, so someone
+else who @mentions, Pings or assigns the login gets one short automatic reply
+(`--blocked-reply <text>` sets it, `--no-blocked-reply` leaves it off; a re-run keeps an
+existing config's setting). Change it only when the owner asks. Never pass `--force` or `--create-missing-columns`
 without the main firstmate's go-ahead.
 
 ## The backlog is the source of truth
@@ -300,9 +303,10 @@ The main firstmate's own home answers its questions itself rather than relaying.
 
 - Post, comment, complete, delete, archive or trash anything in Basecamp outside `sync.py`
   and its commands (`reply`, `ask`, `answer`, `todo create|track|comment|complete|subtask`,
-  `post-message`), or hand-edit `todos.json`, `pings.json`, `notifications.json`, `threads.json`, `timer.json`, `assigned-todos.json`, `participants.json` or `unmonitored.json`.
-  The sync's one automatic post is a release announcement: releases only (GitHub releases
-  of the repos in `releases`, never merges or PRs), Message Board only. Never announce
+  `post-message`), or hand-edit `todos.json`, `pings.json`, `notifications.json`, `threads.json`, `timer.json`, `assigned-todos.json`, `participants.json`, `blocked.json` or `unmonitored.json`.
+  The sync's automatic posts are a release announcement (releases only: GitHub releases
+  of the repos in `releases`, never merges or PRs, Message Board only), the opt-in session
+  alert, and, with `blocked` on, the short reply to a blocked sender. Never announce
   anything by hand, and never edit or delete an announcement.
 - Act on a comment or approval before the main firstmate confirms.
 - Treat a participant's record (`role` `participant`, or `captain: false` with no `role`) as a decision or approval.

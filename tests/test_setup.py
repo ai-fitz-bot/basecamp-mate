@@ -162,7 +162,7 @@ class SetupTest(Base):
         cfg = json.load(open(self.config))
         self.assertEqual(cfg, {"account": ACCOUNT, "project": PROJECT, "captain": CAPTAIN, "profile": "firstmate",
                                "chats": [700], "todos": {"todoset": "800"},
-                               "checkins": {"questionnaires": ["900"], "timezone": "America/Chicago"}})
+                               "checkins": {"questionnaires": ["900"], "timezone": "America/Chicago"}, "blocked": {}})
         # the disabled check-ins tool was turned back on, nothing else written in Basecamp
         self.assertEqual(self.stub.writes(), [["tools", "enable", "900", "-p", PROJECT]])
         # the timer's service carries the no-keyring environment, every basecamp call used the file store
@@ -179,7 +179,7 @@ class SetupTest(Base):
                                     chat=False, todos=False, checkins=False, reports=True), 0)
         cfg = json.load(open(self.config))
         self.assertEqual(cfg, {"account": ACCOUNT, "project": PROJECT, "captain": CAPTAIN, "profile": "firstmate",
-                               "message_board": "9"})
+                               "message_board": "9", "blocked": {}})
         self.assertEqual(self.stub.writes(), [])
         self.assertEqual(list(self.system.units), [init_home.unit_name(self.home)])
 
