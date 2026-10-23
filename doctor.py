@@ -134,6 +134,12 @@ class Doctor:
                      f"Fix: run  {SETUP}  again and answer yes to replacing the settings.")
             return None
         self.ok(f"settings {config}")
+        defaults = os.path.join(os.path.dirname(config), "defaults.md")
+        if os.path.exists(defaults):
+            self.ok(f"workflow defaults {defaults}")
+        else:
+            self.bad("This home has no workflow defaults file, so the agent falls back to the shipped defaults.",
+                     f"Fix: copy {init_home.DEFAULTS} to {defaults}, or run  {SETUP}  again.")
         return s.cfg
 
     def login(self, cfg):

@@ -305,7 +305,7 @@ class InitTest(unittest.TestCase):
             self.init().discover()
         self.init(cards=False, repo_map=[]).main()
         self.assertNotIn("tables", json.load(open(os.path.join(self.dir, "config.json"))))
-        self.assertEqual(sorted(os.listdir(self.dir)), ["config.json", "pending-comments.jsonl"])
+        self.assertEqual(sorted(os.listdir(self.dir)), ["config.json", "defaults.md", "pending-comments.jsonl"])
         self.assertEqual(list(self.system.checks), ["basecamp-sync"])
         self.assertEqual(self.stub.writes(), [])
 

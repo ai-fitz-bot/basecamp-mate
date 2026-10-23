@@ -124,7 +124,7 @@ Without `notifications` (no `profile`, or `"notifications": false`) those four r
 | `pings` | `pings` | `--pings` | Ping reader (hourly sweep) | `reply` to each line, in the Ping |
 | `inbox-delivery` | `inbox` | `--inbox` | deliver each new pending record as a firstmate inbox note | handle the note, then `fm-inbox.sh drain --ack` |
 | `session-alert` | `session_alert` | `--session-alert [MINUTES]` (with `--inbox`; setup asks) | tell the owner once in chat when no firstmate session holds the lock while inbox notes wait (each minute) | start the session again |
-| `backup` | `backup` | `--backup <Docs & Files folder URL>` (setup keeps an existing one) | upload the config and state files that changed to the folder, one latest copy of each (daily) | `sync.py backup` to back up now |
+| `backup` | `backup` | `--backup <Docs & Files folder URL>` (setup keeps an existing one) | upload the config, state files and `defaults.md` that changed to the folder, one latest copy of each (daily) | `sync.py backup` to back up now |
 | `blocked-replies` | `blocked` | default for a new home (`--blocked-reply <text>`; `--no-blocked-reply` to leave off; a re-run keeps an existing setting) | none of its own: the readers post the automatic reply to a blocked sender; the timer step only starts its clock | none: nothing a blocked sender writes reaches the agent |
 
 The boundary: behaviors never run a CLI themselves (every Basecamp, GitHub, backlog or
@@ -591,7 +591,7 @@ one that signs in as the owner, nothing is read: the assignments would be the ow
   `dependabot-unreadable`. Alerts are never dismissed or changed. Code-scanning alerts and
   the global advisory database are not read.
 - Backup: with the optional `backup` config, once a day (and now with `sync.py backup`)
-  the config and its JSON and JSONL state files (never a lock, a `.tmp`, `sync.log`, a hand
+  the config, its JSON and JSONL state files and the home's `defaults.md` (never a lock, a `.tmp`, `sync.log`, a hand
   copy such as `config.json.bak-...`, or `backup.json`) are uploaded to that Docs & Files
   folder, which may be in another project. Only a file whose content changed since its last
   upload is sent: as a new version of its upload there (`basecamp files replace`, so the
@@ -894,10 +894,24 @@ problem prints with its fix; it exits 1 when anything is broken.
 ### The base prompt and the agent skill
 
 [`prompts/base.md`](prompts/base.md) is a base prompt that, given a fresh firstmate home,
-this checkout and a Basecamp project URL, sets the home up and re-establishes every
-behavior: which to turn on, how to handle each pending record, the decision to-do
-lifecycle, chat replies, check-in answers, reports and the safety bounds. Hand it to the
-agent once, with `SYNC`, `HOME` and the project URL filled in.
+this checkout and a Basecamp project URL, sets the home up and re-establishes the
+connection: which behaviors to turn on, what each pending record is and where it is
+answered, who gets through, and the safety bounds. Hand it to the agent once, with `SYNC`,
+`HOME` and the project URL filled in.
+
+[`prompts/defaults.md`](prompts/defaults.md) is the workflow basecamp-mate ships as a
+default, not a rule: where decisions go (a to-do assigned to the owner in the project),
+what gets answered and when (every chat and Ping line), the decision to-do lifecycle,
+check-in answers, reports on the Message Board, unmonitored input, advisories and
+Dependabot alerts, failures. `init` copies it to `<home>/data/basecamp-sync/defaults.md`
+when the home has none and never overwrites that copy; the home owns it, the agent follows
+it over the skill and the inbox notes' hints, and the owner changes it by asking the agent
+("put my decisions in the Ops project"). `diff prompts/defaults.md
+<home>/data/basecamp-sync/defaults.md` shows how a home's copy differs from what ships now.
+The backup keeps it; `doctor` flags a home without one. A home set up before this file
+existed gets it on its next `init` or `setup`, or by copying it there; until then the
+agent falls back to the shipped file, which is the same workflow the base prompt used to
+fix.
 
 [`skills/basecamp-sync/SKILL.md`](skills/basecamp-sync/SKILL.md) is the operating contract
 a firstmate or second mate follows in a home that uses the sync, and points to the base
@@ -1021,6 +1035,7 @@ claim, in `~/.local/state/basecamp-mate/runs/`; see "One home per project and lo
 | `skip.json` | hand | `["task", ...]`: tasks never mirrored |
 | `boards.json` | hand | `{"task": ["board-owning task", ...]}`: extra tasks whose open Lavish boards are linked on this task's card |
 | `decisions.json` | hand | `{"task": {"question": "...", "items": ["..."], "note": "..."}}`: decision text for a card waiting on the captain, rendered as the question, a numbered list and a note in place of the raw hold reason |
+| `defaults.md` | the agent (copied once by `init`) | the home's workflow defaults (see "The base prompt and the agent skill"); the owner changes them by asking the agent |
 
 ## Reading the backlog
 
@@ -1127,6 +1142,10 @@ decision, approval and to-do request authorizing, project members and email doma
 as participants (clients, strangers and masked emails not), never through boosts,
 assignments or unmonitored input, the project's people read once a run with its last list
 standing in, a participant's Ping, `init`'s flags and `doctor`'s domain check;
+`tests/test_defaults.py` covers the workflow defaults: the workflow moved from the base
+prompt into `prompts/defaults.md`, `init` copying it once and never overwriting a home's
+copy (a dry run only planning it), the backup keeping it and `doctor` flagging a home
+without it;
 `tests/test_access_lists.py` covers `project_people` (heard in their project only, never in
 a Ping), `"participants": {"company"}` (a colleague heard and an outsider not, one read per
 person a run, the last company known standing in, an unknown company admitting no one and

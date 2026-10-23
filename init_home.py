@@ -74,6 +74,8 @@ CHECK_ID = "basecamp-sync"
 TIMER_SECONDS = 30  # the timer's period; each behavior's step runs at its own cadence inside it (behaviors.py)
 SIDE_FILES = {"extra-repos.json": {}, "figuring.json": {}, "not-now.json": {}, "skip.json": [],
               "boards.json": {}, "decisions.json": {}, "pending-comments.jsonl": None}
+# The workflow defaults basecamp-mate ships; init copies them beside the config once, and the home owns that copy.
+DEFAULTS = os.path.join(HERE, "prompts", "defaults.md")
 
 CHECK = """#!/usr/bin/env bash
 # Wakes this home's firstmate when the Basecamp sync records a new captain comment,
@@ -621,6 +623,9 @@ class Init:
         for name in self.side_files():
             if not os.path.exists(os.path.join(self.dir, name)):
                 plan.append(f"create empty {os.path.join(self.dir, name)}")
+        defaults = os.path.join(self.dir, "defaults.md")
+        if not os.path.exists(defaults):
+            plan.append(f"copy the shipped workflow defaults to {defaults} (the home's to edit; never overwritten)")
         self.out(json.dumps(cfg, indent=1))
         for note in self.notes:
             self.out(note)
@@ -650,6 +655,9 @@ class Init:
             if not os.path.exists(path):
                 with open(path, "w") as f:
                     f.write("" if empty is None else json.dumps(empty) + "\n")
+        if not os.path.exists(defaults):
+            with open(DEFAULTS) as src, open(defaults, "w") as f:
+                f.write(src.read())
         done = [p for p in plan if not p.startswith("create column")]
         done += self.system.install_timer(*self.units(config_path), dry=False)
         done += self.system.remove_service(unit_name(self.home) + "-listen", dry=False)
