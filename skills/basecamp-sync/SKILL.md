@@ -68,7 +68,10 @@ besides the captain (the config's `people`); `--operator <person>` adds someone 
 authorizes the agent as the captain's does (`operators`); `--participants-project`,
 `--participants-company` and `--participants-domain <domain>` let anyone on the project,
 in the captain's company, or with an email at the domain, ask the agent things
-(`participants`). Someone heard in one project only goes in the config's `project_people`
+(`participants`). For a new home, `init` admits the captain's company by itself on a team
+account (others in that company) and listens only to the captain on a personal one;
+`--no-participants-company` overrides that, and a re-run keeps an existing config's
+setting. Someone heard in one project only goes in the config's `project_people`
 (`{"<project id>": [person ids]}`). `sync.py access` prints who gets through, and where.
 Add only what the owner names: widening
 trust is the owner's call. Prefer ids or exact names: Basecamp masks other people's email

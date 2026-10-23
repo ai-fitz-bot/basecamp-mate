@@ -100,6 +100,8 @@ class Stub:
                 return done({"id": int(PROJECT), "name": "HQ", "dock": copy.deepcopy(self.dock)})
             if path == f"/projects/{PROJECT}/people.json":
                 return done(self.people)
+            if path.startswith("/people.json?page="):  # the account's people, one page
+                return done(self.people if path.endswith("=1") else [])
             if path == "/my/profile.json":
                 return done({"id": ACTING, "name": "Firstmate"})
             if path == "/my/readings.json":
@@ -172,6 +174,7 @@ class SetupTest(Base):
         self.assertEqual(set(self.stub.envs), {"1"})
         self.assertIn(["run.sh", self.home, self.config], self.stub.calls)
         self.assertIn("On:  chat inbox, decision to-dos, check-in answers", self.text())
+        self.assertIn("Listens to: only you; anyone else gets a short automatic reply.", self.text())
         self.assertIn("basecamp-mate setup` again", self.text())
 
     def test_project_url_and_choices(self):

@@ -50,6 +50,8 @@ class Stub:
                 data = self.project
             elif path == "/projects/22222222/people.json":
                 data = self.people
+            elif path.startswith("/people.json?page="):  # the account's people, one page
+                data = self.people if path.endswith("=1") else []
             elif path == "/my/profile.json":
                 data = {"id": ACTING}
             else:

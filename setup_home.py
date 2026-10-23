@@ -429,16 +429,21 @@ class Setup:
             off["releases"] = "no registered code repo is on GitHub"
             chosen["releases"] = False
         worked = self.test_sync(home, config)
-        self.summary(home, proj, chosen, off, worked)
+        self.summary(home, proj, chosen, off, worked, cfg)
         return 0 if worked else 1
 
-    def summary(self, home, proj, chosen, off, worked):
+    def summary(self, home, proj, chosen, off, worked, cfg):
         self.out(f"\nDone. The agent at {home} is connected to the Basecamp project {proj.get('name')!r}.")
         on = [LABELS[k] for k in LABELS if chosen.get(k)]
         self.out("  On:  " + (", ".join(on) or "nothing"))
         self.out("  Off: " + (", ".join(LABELS[k] for k in LABELS if not chosen.get(k)) or "nothing"))
         for k, why in off.items():
             self.out(f"  ({LABELS[k]} is off: {why})")
+        company = (cfg.get("participants") or {}).get("company") not in (None, False)
+        self.out("  Listens to: " + ("you, and everyone in your company, who may ask it things (only you decide)"
+                                     if company else "only you")
+                 + ("; anyone else gets a short automatic reply" if cfg.get("blocked") not in (None, False)
+                    else "; anyone else is ignored") + ". Ask the agent to change who it listens to.")
         self.out("To change any of this, run `basecamp-mate setup` again and give different answers.\n"
                  "If something stops working, run `basecamp-mate doctor`.")
         if not worked:
