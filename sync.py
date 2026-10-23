@@ -50,9 +50,9 @@ Usage: sync.py --home <home> --config <config.json> [--all] [--dry-run] [--inclu
        sync.py reply --home <home> --config <config.json> --recording <comment, chat line or Ping line id> --body-file <file> [--again] [--dry-run]
        sync.py ask --home <home> --config <config.json> --body-file <file> [--dry-run]
        sync.py answer --home <home> --config <config.json> --question <check-in question id> --body-file <file> [--dry-run]
-       sync.py todo create --home <home> --config <config.json> --key <key> --title <text> [--body-file <file>] [--list <id>] [--due YYYY-MM-DD] [--subtask <question>]... [--dry-run]
+       sync.py todo create --home <home> --config <config.json> --key <key> --title <text> [--body-file <file>] [--project <id>] [--list <id>] [--due YYYY-MM-DD] [--subtask <question>]... [--card-table <id> --column <id>] [--dry-run]
        sync.py todo subtask --home <home> --config <config.json> --todo <key or id> --number <n> [--dry-run]
-       sync.py todo track --home <home> --config <config.json> --key <key> --todo <id> [--dry-run]
+       sync.py todo track --home <home> --config <config.json> --key <key> --todo <id> [--project <id>] [--dry-run]
        sync.py todo comment --home <home> --config <config.json> --todo <key or id> --body-file <file> [--dry-run]
        sync.py todo complete --home <home> --config <config.json> --todo <key or id> [--dry-run]
        sync.py todo show --home <home> --config <config.json> --todo <key or id>
@@ -225,6 +225,8 @@ def todo_cli(argv, runner):
     ap = common(f"sync.py todo {sub}", descs[sub])
     if sub in ("create", "track"):
         ap.add_argument("--key", required=True, help="a stable key for this to-do, e.g. the task id")
+        ap.add_argument("--project", help="the project it is in, any of the account's (default: the config's "
+                                          '"todos" "project", else the configured project)')
     if sub == "create":
         ap.add_argument("--title", required=True)
         ap.add_argument("--body-file", help="the description, Markdown")
@@ -232,6 +234,8 @@ def todo_cli(argv, runner):
         ap.add_argument("--due", help="YYYY-MM-DD")
         ap.add_argument("--subtask", action="append", default=[],
                         help="one decision, repeatable, every one when there are several: each becomes a native Basecamp subtask")
+        ap.add_argument("--card-table", help="make it a card on this card table instead (with --column)")
+        ap.add_argument("--column", help="the card table column the card goes in")
     elif sub == "track":
         ap.add_argument("--todo", required=True, type=int, help="the to-do's id")
     else:
@@ -242,8 +246,12 @@ def todo_cli(argv, runner):
         ap.add_argument("--body-file", required=True, help="the comment, Markdown")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv[1:])
-    calls = {"create": lambda s: s.todo_create(a.key, a.title, read(a.body_file) if a.body_file else "", a.list, a.due, a.subtask),
-             "track": lambda s: s.todo_track(a.key, a.todo),
+    if sub == "create" and bool(a.card_table) != bool(a.column):
+        ap.error("--card-table and --column go together")
+    card = (a.card_table, a.column) if sub == "create" and a.card_table else None
+    calls = {"create": lambda s: s.todo_create(a.key, a.title, read(a.body_file) if a.body_file else "", a.list, a.due, a.subtask,
+                                               a.project, card),
+             "track": lambda s: s.todo_track(a.key, a.todo, a.project),
              "comment": lambda s: s.todo_comment(a.todo, read(a.body_file)),
              "complete": lambda s: s.todo_complete(a.todo),
              "subtask": lambda s: s.todo_subtask(a.todo, a.number),

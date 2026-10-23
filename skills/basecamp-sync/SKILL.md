@@ -126,7 +126,9 @@ With `todos` on, put each item waiting on the captain (a decision, approval, mer
 credential or login) to them as one to-do instead:
 `python3 $SYNC/sync.py todo create --home <home> --config <config> --key <stable key> --title "<plain question>" --body-file <file>`,
 with a Markdown description of the evidence, consequence, options, recommendation and the
-full URL of every PR. When it carries more than one decision, every one of them, the first
+full URL of every PR. It goes where the config's `todos` says (this project unless it names
+another `project` or a `list`); `--project <id>`, `--list <id>` or `--card-table <id>
+--column <id>` (a card) put one decision somewhere else, as the home's defaults say. When it carries more than one decision, every one of them, the first
 included, is its own repeatable `--subtask "<question>"` by default, the title names the
 topic and the description holds only context, never a question outside the subtasks (each a native
 Basecamp subtask of the to-do, numbered from 1 in order; basecamp CLI 0.12.0+), complete

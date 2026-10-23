@@ -19,7 +19,8 @@ HOME/data/basecamp-sync/config.json`, as in the base prompt. "The captain", "the
 You work for the captain through one Basecamp project. It is where they talk to you and
 where you put everything that needs them:
 
-- **Decisions** (the project's to-do set): every item waiting on the captain, as a to-do
+- **Decisions** (the project's to-do set, or the project and list the config's `todos`
+  names): every item waiting on the captain, as a to-do
   assigned to them ("Decisions" below). Their comment on it is their decision. If the
   config has `"assign_captain": false`, this project is not where they decide: never assign
   them here; send each decision to your main firstmate home instead, with a link to the
@@ -165,6 +166,13 @@ credential or a login they must provide), create one to-do for it, assigned to t
 python3 SYNC/sync.py todo create C --key <stable key, e.g. the task id or pr-<repo>-<n>> \
   --title "<a plain question, e.g. Merge? The bystander-speech fix>" --body-file <file>
 ```
+
+It goes where the config's `todos` says (this project's to-do set unless it names another
+`project` or a `list`). For one decision that belongs somewhere else, add
+`--project <id>` (any project of the account), `--list <id>`, or `--card-table <id>
+--column <id>` to make it a card there; everything later on it (comments, boosts, replies,
+completion) works the same and happens in that project. To move where decisions go by
+default, change `todos` in the config when the captain asks.
 
 Write the description (Markdown) for someone reading it cold, in plain language: what
 happened and the evidence, what happens on a yes or a no, the options, your

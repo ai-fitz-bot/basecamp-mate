@@ -32,7 +32,8 @@ MIN_BASECAMP = (0, 12, 0)  # the first CLI with `basecamp subtasks`, which decis
 # The yes/no questions, in the order asked: (answer key, question, default).
 QUESTIONS = (
     ("chat", "Relay your questions from the project's chat (Campfire) to the agent?", True),
-    ("todos", "Let the agent ask you for decisions as to-dos assigned to you?", True),
+    ("todos", "Let the agent put decisions to you as to-dos assigned to you? (In this project to start; ask the agent "
+              "to use another project, list or card table any time.)", True),
     ("checkins", "Let the agent answer the project's automatic check-in questions?", True),
     ("cards", "Mirror the agent's task list onto card tables (one per code repo)?", False),
     ("assign", "Assign you to a card when its task waits on your decision? (No: the agent sends each decision to "
