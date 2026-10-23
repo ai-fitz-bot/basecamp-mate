@@ -17,7 +17,7 @@ Any firstmate user on Basecamp, whatever their projects, lists and card tables l
 4. **Plain language in the user's local time** in everything it writes.
 5. **Who it listens to is explicit, and enforced before firstmate.** Only people on its allow lists get through: account-wide, per project, or a trusted group for risky actions. A message from anyone else never reaches firstmate; basecamp-mate blocks it and posts a short automatic reply saying it cannot act on the request. The default is only the account owner for a personal account and everyone in the company for a team account, and both change by asking firstmate.
 
-It builds on [basecamp-axi](https://github.com/calebl/basecamp-axi) for talking to Basecamp.
+It talks to Basecamp through its own direct calls to the `basecamp` CLI. Agents can use [basecamp-axi](https://github.com/calebl/basecamp-axi) alongside it for their own reading of Basecamp.
 
 ## Non-goals
 

@@ -11,6 +11,7 @@ import test_sync  # noqa: E402
 import test_init  # noqa: E402
 import test_setup  # noqa: E402
 import behaviors  # noqa: E402
+import doctor  # noqa: E402
 import init_home  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -103,6 +104,35 @@ class Backed(test_sync.Base):
         self.backup()
         self.assertEqual(sorted(os.path.basename(a[2]) for a in self.stub.made("uploads create")),
                          ["config.json", "defaults.md"])
+
+
+class Axi(test_setup.Base):
+    """basecamp-axi is the agent's optional companion for reading: reported, never required, never used by the sync."""
+    healthy = test_setup.DoctorTest.healthy
+
+    def doctor(self, have_axi):
+        self.printed.clear()
+        which = lambda n: None if n == "basecamp-axi" and not have_axi else "/usr/bin/" + n  # noqa: E731
+        return doctor.Doctor(runner=self.stub, system=self.system, which=which, out=self.printed.append).main()
+
+    def test_doctor_reports_it_as_optional_either_way(self):
+        self.healthy()
+        self.assertEqual(self.doctor(True), 0, self.text())
+        self.assertIn("basecamp-axi (optional), for the agent's own reading of Basecamp", self.text())
+        self.assertEqual(self.doctor(False), 0, self.text())
+        self.assertIn("basecamp-axi is not installed (optional", self.text())
+
+    def test_setup_says_whether_it_is_there(self):
+        self.setup(project=test_setup.PROJECT, checkins=False)
+        self.assertIn("Optional: basecamp-axi is installed", self.text())
+
+    def test_the_vision_and_the_defaults_say_what_it_is_for(self):
+        with open(os.path.join(ROOT, "VISION.md")) as f:
+            vision = f.read()
+        self.assertNotIn("builds on [basecamp-axi]", vision)
+        self.assertIn("its own direct calls to the `basecamp` CLI", vision)
+        self.assertIn("Only read with it.", shipped("defaults.md"))
+        self.assertIn("basecamp-axi to write directly", shipped("base.md"))
 
 
 class Doctor(test_setup.Base):

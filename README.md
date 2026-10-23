@@ -55,6 +55,13 @@ Everything below is the detailed reference.
 Connects an agent home to one Basecamp project through the `basecamp` CLI, in two
 layers. No model calls.
 
+The sync makes its own direct calls to the `basecamp` CLI (JSON in, JSON out) and never
+uses [basecamp-axi](https://github.com/calebl/basecamp-axi). basecamp-axi is an optional
+companion for the agent: when it is installed, the shipped defaults have the agent read
+Basecamp with it as its own login (`BASECAMP_PROFILE=<profile> basecamp-axi ...`) when a
+record is not enough, while every write still goes through the `sync.py` commands.
+`setup` and `doctor` say whether it is installed; nothing requires it.
+
 ## Two layers: tools and behaviors
 
 **Tools** ([`tools.py`](tools.py)) are small, explicit, single-purpose operations with no
@@ -1192,7 +1199,9 @@ or handled for the decisions put there, a decision card's own event never unmoni
 `tests/test_defaults.py` covers the workflow defaults: the workflow moved from the base
 prompt into `prompts/defaults.md`, `init` copying it once and never overwriting a home's
 copy (a dry run only planning it), the backup keeping it, `doctor` flagging a home
-without it, and inbox notes giving facts and commands but never the handling;
+without it, inbox notes giving facts and commands but never the handling, and basecamp-axi
+reported as optional by `doctor` and `setup` and described as read-only in the vision,
+defaults and bounds;
 `tests/test_access_lists.py` covers `project_people` (heard in their project only, never in
 a Ping), `"participants": {"company"}` (a colleague heard and an outsider not, one read per
 person a run, the last company known standing in, an unknown company admitting no one and

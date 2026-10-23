@@ -324,6 +324,10 @@ The main firstmate's own home answers its questions itself rather than relaying.
 
 ## Never
 
+- Write to Basecamp with basecamp-axi: it is only for your own reading (the whole to-do or
+  card, comments, mention handles, search, links) as the agent's login
+  (`BASECAMP_PROFILE=<profile> basecamp-axi ...`), as the home's defaults say; the sync
+  itself never uses it.
 - Post, comment, complete, delete, archive or trash anything in Basecamp outside `sync.py`
   and its commands (`reply`, `ask`, `answer`, `todo create|track|comment|complete|subtask`, `decide`,
   `post-message`), or hand-edit `todos.json`, `pings.json`, `notifications.json`, `threads.json`, `timer.json`, `assigned-todos.json`, `participants.json`, `companies.json`, `blocked.json` or `unmonitored.json`.
