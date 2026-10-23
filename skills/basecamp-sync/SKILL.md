@@ -27,10 +27,14 @@ only when the card mirror is on. Mechanics (column rules, file formats, record f
 safety bounds) are in the repo's README: `basecamp-mate/README.md` (https://github.com/calebl/basecamp-mate). `SYNC` below
 means that checkout.
 
-`$SYNC/prompts/base.md` is the full policy for a home that runs everything through
-Basecamp (decision to-dos, every-line chat, check-in answers, reports): set-up flags,
-the decision to-do lifecycle, and how to handle each record. Follow it in such a home;
-this skill is the short form.
+`$SYNC/prompts/base.md` sets a home up and lists the records and the bounds. How the home
+works with Basecamp (where decisions go, what is answered and when, the decision to-do
+lifecycle, check-ins, reports, unmonitored input, advisories) is the home's own
+`data/basecamp-sync/defaults.md`, which `init` copies from `$SYNC/prompts/defaults.md` once
+and never overwrites. Read it and follow it; where it and this skill (or an inbox note's
+handling hint) differ, the home's defaults win. When the owner asks to change how the agent
+works with Basecamp, edit that file, not the sync. The workflow this skill describes below
+is the shipped default.
 
 ## Set up
 

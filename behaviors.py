@@ -809,9 +809,10 @@ class Backup(Behavior):
         t.log(f"backup to folder {self.vault}: {sent} uploaded, {same} unchanged" + (" (dry run)" if t.dry else ""))
 
 
-# The files a backup uploads: the config and the JSON and JSONL state beside it; never a lock, a .tmp, sync.log,
-# a hand copy (config.json.bak-...) or backup.json itself, which changes with every backup.
-BACKED_UP = re.compile(r"(?!backup\.json$)[\w.-]+\.jsonl?")
+# The files a backup uploads: the config, the JSON and JSONL state beside it and the home's workflow defaults
+# (defaults.md); never a lock, a .tmp, sync.log, a hand copy (config.json.bak-...) or backup.json itself, which changes
+# with every backup.
+BACKED_UP = re.compile(r"(?!backup\.json$)[\w.-]+\.jsonl?|defaults\.md")
 # A config key that names a credential, and a value shaped like a token (GitHub, Slack, OpenAI-style, bearer, PEM).
 SECRET_KEY = re.compile(r"(?i)(token|secret|passw(or)?d|api[_-]?key|credentials?|private[_-]?key|auth[_-]?header)")
 SECRET_VALUE = re.compile(r"\b(gh[opusr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|xox[abprs]-[\w-]{10,}|sk-[\w-]{20,})"
