@@ -4,6 +4,7 @@ The basecamp CLI and the notifications are stubbed; nothing touches the network.
 """
 import io, json, os, sys, unittest
 from contextlib import redirect_stderr
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_sync import ACTING, CAPTAIN, Base, Stub, item, line  # noqa: E402
@@ -18,6 +19,7 @@ import sync  # noqa: E402
 
 MATE = 12121212  # a listened-to person who is not the captain
 STRANGER = 13131313  # someone on the project nobody listens to
+OUTSIDE = 14141414  # someone in the account who is not on the project
 
 
 def named(person_id):
@@ -206,11 +208,61 @@ class Init(unittest.TestCase):
         self.assertNotIn("people", self.init().discover()[0])
 
     def test_unknown_ambiguous_or_the_login_refused(self):
-        for arg, why in (("nobody@example.com", "matches no person"), ("twin", "several people"),
-                         (str(ACTING), "is the login firstmate itself")):
+        for arg, why in (("nobody@example.com", "matches no person on the project or in the account"),
+                         ("twin", "several people on the project"), (str(ACTING), "is the login firstmate itself")):
             with self.assertRaises(init_home.Refuse) as e:
                 self.init(listen_to=[arg]).discover()
             self.assertIn(why, str(e.exception))
+
+    def test_someone_in_the_account_but_not_on_the_project_is_accepted_and_named(self):
+        self.stub.account += [{"id": OUTSIDE, "name": "Outside Pat"}, {"id": OUTSIDE + 1, "name": "Ops Lee"}]
+        for args in ([str(OUTSIDE)], ["outside pat"]):
+            init = self.init(listen_to=args, operators=["Ops Lee"], participants_company=False)
+            cfg = init.discover()[0]
+            self.assertEqual((cfg["people"], cfg["operators"]), ([CAPTAIN, OUTSIDE], [OUTSIDE + 1]))
+            self.assertIn(f"--listen-to: not members of project 22222222, found in the account and written all the same: "
+                          f"Outside Pat ({OUTSIDE})", "\n".join(init.notes))
+            self.assertIn(f"--operator: not members of project 22222222, found in the account and written all the same: "
+                          f"Ops Lee ({OUTSIDE + 1})", "\n".join(init.notes))
+        self.assertEqual(self.stub.calls.count(["api", "get", "/people.json?page=1"]), 2)  # read once a run, not per person
+        init = self.init(listen_to=["mate"])  # a project member: the account is never read, nothing to say
+        init.discover()
+        self.assertFalse([n for n in init.notes if "not members" in n])
+
+    def test_a_tie_in_the_account_or_a_failed_account_read_refused(self):
+        self.stub.account += [{"id": OUTSIDE, "name": "Sam"}, {"id": OUTSIDE + 1, "name": "Sam"}]
+        with self.assertRaises(init_home.Refuse) as e:
+            self.init(operators=["sam"]).discover()
+        self.assertIn("--operator sam matches several people in the account: Sam", str(e.exception))
+        real = self.stub.__call__
+
+        def failing(cmd, **kw):
+            if cmd[-2].startswith("/people.json"):
+                return SimpleNamespace(stdout=json.dumps({"ok": False, "error": "boom"}), stderr="", returncode=1)
+            return real(cmd, **kw)
+        self.stub = failing
+        with self.assertRaises(init_home.Refuse) as e:
+            self.init(listen_to=[str(OUTSIDE)], participants_company=False).discover()
+        self.assertIn(f"--listen-to {OUTSIDE} matches no person on the project or in the account (the account's people "
+                      "could not be read", str(e.exception))
+
+    def test_a_rerun_keeps_people_and_operators_it_does_not_name(self):
+        self.stub.account += [{"id": OUTSIDE, "name": "Outside Pat"}]
+        self.init(listen_to=[str(OUTSIDE)], operators=["mate"]).main()
+        path = os.path.join(self.home, "data", "basecamp-sync", "config.json")
+        first = json.load(open(path))
+        self.assertEqual((first["people"], first["operators"]), ([CAPTAIN, OUTSIDE], [MATE]))
+        init = self.init()  # the same home, nothing named: unchanged, so no --force is needed
+        init.main()
+        self.assertEqual(json.load(open(path)), first)
+        self.assertIn(f"kept from the existing config: people {OUTSIDE}; operators {MATE} (pass --replace-people",
+                      "\n".join(self.printed))
+        self.init(listen_to=["mate"], force=True).main()  # another person named: added beside the kept ones
+        self.assertEqual(json.load(open(path))["people"], [CAPTAIN, MATE, OUTSIDE])
+        self.init(listen_to=["mate"], replace_people=True, force=True).main()  # replaced: exactly what is named
+        cfg = json.load(open(path))
+        self.assertEqual(cfg["people"], [CAPTAIN, MATE])
+        self.assertNotIn("operators", cfg)
 
     def test_cli_flag_is_repeatable(self):
         seen = {}
@@ -228,6 +280,13 @@ class Init(unittest.TestCase):
             init_home.Init.__init__ = real
         self.assertEqual(seen["listen_to"], ["a", "b"])
         self.assertNotIn("listen", seen)
+        self.assertFalse(seen["replace_people"])
+        init_home.Init.__init__ = spy
+        try:
+            init_home.cli(["https://app.basecamp.com/1/projects/2", "--login", "f", "--home", self.home, "--replace-people"])
+        finally:
+            init_home.Init.__init__ = real
+        self.assertTrue(seen["replace_people"])
 
 
 if __name__ == "__main__":
