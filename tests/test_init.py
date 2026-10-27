@@ -31,6 +31,7 @@ class Stub:
         self.tables = {"100": table(100, "Server"), "200": table(200, "Engine ")}
         self.people = [{"id": CAPTAIN, "name": "Captain", "owner": True, "email_address": "cap@example.com"},
                        {"id": ACTING, "name": "Firstmate", "owner": False, "email_address": "fm@example.com"}]
+        self.account = []  # people in the account who are not on the project
         self.calls = []
         self.origins, self.renames = {}, {}  # projects/<repo> -> origin URL; owner/name -> gh nameWithOwner
 
@@ -51,7 +52,7 @@ class Stub:
             elif path == "/projects/22222222/people.json":
                 data = self.people
             elif path.startswith("/people.json?page="):  # the account's people, one page
-                data = self.people if path.endswith("=1") else []
+                data = self.people + self.account if path.endswith("=1") else []
             elif path == "/my/profile.json":
                 data = {"id": ACTING}
             else:
