@@ -201,7 +201,9 @@ does: its own lines only move cursors. "Owner" below means anyone the sync liste
 **One caveat decides which to use.** Basecamp shows a person's email address only to
 themselves and to account admins; everyone else sees it masked (`r••••@•••.•••`). Unless
 the agent's login is an account admin, a domain matches no one and an email passed to
-`--operator` or `--listen-to` matches no one (`init` says why). `"project": true` and the
+`--operator` or `--listen-to` matches no one (`init` says why). Operators and people need
+not be on the project: `init` looks a person it cannot find there up among the account's
+people, and `sync.py access` lists them like anyone else. `"project": true` and the
 named lists are keyed on person ids, which every login sees. `init` warns, and `doctor`
 flags, domains that can admit nobody. The project's people are read once a run, only when
 someone not named writes, and kept in `participants.json`, whose last list stands in when
@@ -833,9 +835,17 @@ board. A repo's `note` is added by hand. `--captain <person id or
 email>` names the captain; by default it is the project's one account owner other than the
 login. `--listen-to <person>` (repeatable: a person id, email or exact name on the
 project) adds someone the sync listens to besides the captain, written as `people` (the
-captain first); a name or email matching no one or several people, or the login itself,
-is refused. `--operator <person>` (repeatable, the same forms) names an operator, written
-as `operators`; `--participants-project` and `--participants-domain <domain>` (repeatable)
+captain first). Someone not on the project (a colleague who is not on the agent's project,
+say) is looked up among the account's people (`/people.json`, every page, read once a run)
+and written all the same, and `init` prints which accepted people are not members of the
+project; a name or email matching no one on the project or in the account, several people
+on the project (or, when none is on it, in the account), or the login itself, is refused,
+and so is a person not on the project when the account's people cannot be read.
+`--operator <person>` (repeatable, the same forms) names an operator, written
+as `operators`. A re-run on a home that already has a config keeps the `people` and
+`operators` it names besides the ones the command line names (and says which it kept), as
+it keeps `participants` and `blocked`, so re-running `init` or `setup` never drops a hand-added
+person; `--replace-people` writes exactly the `--listen-to` and `--operator` given instead; `--participants-project` and `--participants-domain <domain>` (repeatable)
 admit participants, written as `participants` (see "People the sync listens to"; an email
 the login sees masked matches no one, and `init` says so, and warns when a domain can admit
 nobody). `--repo-map <table>=<repo>` (repeatable) maps a table whose title is not a
@@ -975,6 +985,8 @@ or by hand from
   none. See "People the sync listens to".
 - `people` (optional): the Basecamp person ids whose lines, comments and boosts are
   relayed, as participants; the captain is always included. Default: just the captain.
+  Neither list needs its people on the project; a re-run of `init` keeps both unless
+  `--replace-people`.
 - `project_people` (optional): `{"<project id>": [person ids]}`: named participants heard
   only in that project. Default: none.
 - `participants` (optional): `{"project": true}`, `{"company": true | <company id>}` and/or
@@ -1200,7 +1212,9 @@ read, a failed mark retried, other projects left alone, unmonitored input once p
 (old listener keys still applying), the timer's cadences and the upgrade from a `"listen"`
 config; `tests/test_people.py` covers the `people` list: relaying
 several people with who wrote each record, captain-only approvals and decisions, an
-unchanged single-captain config and `init --listen-to`; `tests/test_pings.py` covers the Ping reader with a stubbed
+unchanged single-captain config and `init --listen-to` and `--operator` (someone only in
+the account accepted and named, a miss or a tie in the account and a failed account read
+refused, a re-run keeping the people and operators it does not name, `--replace-people`); `tests/test_pings.py` covers the Ping reader with a stubbed
 `/my/readings.json`, the reply in a Ping, and a Ping's notification and boosts;
 `tests/test_trust.py` covers operators and participants: roles, an operator's line,
 decision, approval and to-do request authorizing, project members and email domains heard
@@ -1237,7 +1251,8 @@ defaults and bounds;
 a Ping), `"participants": {"company"}` (a colleague heard and an outsider not, one read per
 person a run, the last company known standing in, an unknown company admitting no one and
 getting no automatic reply, a company by id, a colleague's assignment neither a request nor
-answered), `sync.py access`, and `init`'s account-aware default (a personal account the
+answered), `sync.py access` (people `init` found only in the account listed as operators
+and people), and `init`'s account-aware default (a personal account the
 captain only, the agent's own person and a client not making a team, a team account the
 company, a failed read the captain only, an existing config kept, the flags overriding);
 `tests/test_blocked.py` covers blocked senders: a stranger's @mention in a relayed or

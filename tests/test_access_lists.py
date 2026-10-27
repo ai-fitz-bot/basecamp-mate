@@ -151,6 +151,23 @@ class Access(NotifBase):
                      "one automatic reply when they address the agent: 'Not me.'"):
             self.assertIn(want, text)
 
+    def test_people_init_found_only_in_the_account_are_listed_where_they_are_heard(self):
+        t = test_init.InitTest("run")
+        t.setUp()
+        try:
+            t.stub.account += [{"id": OUTSIDER, "name": "Out"}, {"id": GUEST, "name": "Op"}]
+            written = t.init(listen_to=[str(OUTSIDER)], operators=["op"], participants_company=False).discover()[0]
+        finally:
+            t.tearDown()
+        self.stub = with_companies(NotifStub)
+        self.cfg(people=written["people"], operators=written["operators"])
+        out = []
+        self.sync().access(out=out.append)
+        text = "\n".join(out)
+        self.assertIn(f"operators (their word counts as the captain's: the trusted group for risky actions): "
+                      f"person-{GUEST} ({GUEST})", text)
+        self.assertIn(f"people (participants everywhere this home reads): person-{OUTSIDER} ({OUTSIDER})", text)
+
     def test_defaults_and_a_failed_name_read(self):
         self.stub.fail.add("/people/")
         out = []

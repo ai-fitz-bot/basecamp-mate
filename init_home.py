@@ -45,7 +45,9 @@ sync mirrors from the backlog). --advisories
 people the sync listens to besides the captain, as "people"; their input is relayed
 with who wrote it, but only the captain decides or approves. --operator <person> (the same
 forms) names someone whose word authorizes the agent as the captain's does, as
-"operators"; --participants-project (anyone on the project who is not a client),
+"operators". A person not on the project is looked up among the account's people and
+written all the same, with a line saying so; a re-run keeps the people and operators an
+existing config names besides these, unless --replace-people; --participants-project (anyone on the project who is not a client),
 --participants-company (anyone in the captain's company in Basecamp: the default for a new
 home on a team account, where others are in that company; --no-participants-company for
 the captain only; a re-run without either keeps an existing config's setting) and
@@ -249,7 +251,7 @@ class Init:
                  participants_domains=(), participants_company=None, repo_map=(), create_missing=False, dry=False,
                  force=False, cards=True, assign_captain=True, todos=False, reports=False, every_line=False, checkins=None, releases=True, inbox=False,
                  session_alert=None, pings=False, assigned_todos=False, assigned_anywhere=False, assigned_cards=False, mentions_anywhere=False, advisories=(), backup=None, chats=True, no_keyring=None,
-                 blocked=None, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
+                 blocked=None, replace_people=False, runner=subprocess.run, system=None, sync_dir=HERE, out=print):
         self.account, self.project = parse_url(url)
         self.login, self.home = login, os.path.abspath(home)
         self.captain_arg, self.listen_to, self.operator_args = captain, list(listen_to), list(operators)
@@ -286,6 +288,9 @@ class Init:
         # The automatic reply to blocked senders: None keeps an existing config's setting (on for a new home), False
         # leaves it off, a string is the reply's text.
         self.blocked = blocked
+        # A re-run keeps an existing config's people and operators that the command line does not name, unless this says
+        # to replace them with exactly the ones it names.
+        self.replace_people = replace_people
         self.no_keyring = bool(os.environ.get("BASECAMP_NO_KEYRING")) if no_keyring is None else no_keyring
         if checkins is not None:
             try:
@@ -296,6 +301,7 @@ class Init:
         self.system = system or System()
         self.sync_dir = sync_dir
         self.notes = []  # what discover found worth saying, printed after the config
+        self.account_people = None  # the account's people, read once when a named person is not on the project
         self.out = out
         self.dir = os.path.join(self.home, "data", "basecamp-sync")
 
@@ -386,10 +392,18 @@ class Init:
         if problems:
             raise Refuse("init refused, nothing was written:\n  - " + "\n  - ".join(problems))
         cfg = {"account": self.account, "project": self.project, "captain": captain, "profile": self.login}
-        if listened:
-            cfg["people"] = [captain] + sorted(set(listened) - {captain})
-        if set(operators) - {captain}:
-            cfg["operators"] = sorted(set(operators) - {captain})
+        # A re-run keeps the people and operators an existing config names besides these, unless --replace-people.
+        kept = {} if self.replace_people or self.existing() is None else self.existing()
+        kept_people = [p for p in kept.get("people") or [] if p != captain and p not in listened]
+        kept_operators = [p for p in kept.get("operators") or [] if p != captain and p not in operators]
+        if kept_people or kept_operators:
+            self.notes.append("kept from the existing config: " + "; ".join(
+                f"{key} {', '.join(map(str, ids))}" for key, ids in (("people", kept_people), ("operators", kept_operators))
+                if ids) + " (pass --replace-people to keep only the ones this command names)")
+        if listened or "people" in kept:
+            cfg["people"] = [captain] + sorted(set(listened + kept_people) - {captain})
+        if set(operators + kept_operators) - {captain}:
+            cfg["operators"] = sorted(set(operators + kept_operators) - {captain})
         company = self.participants_company
         if company is None and self.existing() is not None:  # an existing home keeps its own
             company = (self.existing().get("participants") or {}).get("company")
@@ -563,20 +577,31 @@ class Init:
 
     def find_people(self, people, acting, problems, args=None, flag="--listen-to"):
         """The person ids each --listen-to (or `flag`, naming `args`) names (an id, an email or an exact name), refusing a
-        miss, a tie or the login. An email matches only when the login can see it: Basecamp masks other people's
-        email addresses unless the login is an account admin."""
-        found = []
-        for arg in (str(a).strip() for a in (self.listen_to if args is None else args)):
+        miss, a tie or the login. Someone not on the project is looked up among the account's people, accepted when
+        exactly one matches, and named in a note. An email matches only when the login can see it: Basecamp masks other
+        people's email addresses unless the login is an account admin."""
+        def matching(pool, arg):
             if arg.isdigit():
-                hits = [p for p in people if p.get("id") == int(arg)]
-            else:
-                hits = [p for p in people if (p.get("email_address") or "").lower() == arg.lower()]
-                hits = hits or [p for p in people if (p.get("name") or "").strip().lower() == arg.lower()]
+                return [p for p in pool if p.get("id") == int(arg)]
+            hits = [p for p in pool if (p.get("email_address") or "").lower() == arg.lower()]
+            return hits or [p for p in pool if (p.get("name") or "").strip().lower() == arg.lower()]
+
+        found, outside = [], []
+        for arg in (str(a).strip() for a in (self.listen_to if args is None else args)):
+            hits, where, unread = matching(people, arg), "on the project", None
+            if not hits:
+                try:
+                    hits, where = matching(self.everyone(), arg), "in the account"
+                except Refuse as e:
+                    unread = e
             if len(hits) != 1:
+                pool = people if where == "on the project" else self.account_people or people
                 names = ", ".join(f"{p.get('name')} ({p.get('id')})" for p in hits)
-                masked = "@" in arg and not hits and any(not visible(p) for p in people if p.get("id") != acting)
-                problems.append(f"{flag} {arg} matches " + (f"several people on the project: {names}; pass the person id"
-                                                            if hits else "no person on the project" + (
+                masked = "@" in arg and not hits and any(not visible(p) for p in pool if p.get("id") != acting)
+                problems.append(f"{flag} {arg} matches " + (f"several people {where}: {names}; pass the person id"
+                                                            if hits else "no person on the project or in the account" + (
+                                                                f" (the account's people could not be read: {unread})"
+                                                                if unread else "") + (
                                                                 " (Basecamp hides other people's email addresses unless the "
                                                                 "login is an account admin; pass the person id or exact name)"
                                                                 if masked else "")))
@@ -585,7 +610,26 @@ class Init:
                 problems.append(f"{flag} {arg} is the login {self.login} itself; the agent never listens to its own lines")
                 continue
             found.append(hits[0]["id"])
+            if where == "in the account":
+                outside.append(f"{hits[0].get('name')} ({hits[0]['id']})")
+        if outside:
+            self.notes.append(f"{flag}: not members of project {self.project}, found in the account and written all the "
+                              f"same: {', '.join(outside)}; they are heard wherever they reach the agent, and in this "
+                              "project once they join it")
         return found
+
+    def everyone(self):
+        """The account's people (/people.json, every page), read once; a failed read is refused."""
+        if self.account_people is None:
+            everyone, page = [], 1
+            while page <= 100:
+                batch = self.bc("api", "get", f"/people.json?page={page}") or []
+                if not batch:
+                    break
+                everyone += batch
+                page += 1
+            self.account_people = everyone
+        return self.account_people
 
     def environment(self):
         """The unit's Environment= lines: the file credential store when --no-keyring."""
@@ -697,10 +741,14 @@ def cli(argv, **kw):
     ap.add_argument("--captain", help="the captain's person id or email (default: the project's account owner)")
     ap.add_argument("--listen-to", action="append", default=[], metavar="PERSON",
                     help="also relay this person's lines, comments and boosts as information, never as the captain's "
-                         "decisions: a person id, email or exact name on the project (repeatable; the captain is always listened to)")
+                         "decisions: a person id, email or exact name on the project or, failing that, in the account "
+                         "(repeatable; the captain is always listened to)")
     ap.add_argument("--operator", action="append", default=[], metavar="PERSON",
                     help="someone whose word authorizes the agent as the captain's does (approvals, decisions): a person "
-                         "id, email or exact name on the project (repeatable)")
+                         "id, email or exact name on the project or, failing that, in the account (repeatable)")
+    ap.add_argument("--replace-people", action="store_true",
+                    help="write exactly the --listen-to and --operator given as people and operators (a re-run otherwise "
+                         "keeps the ones an existing config names besides them)")
     ap.add_argument("--participants-project", action="store_true",
                     help="also relay what anyone on the project (not a client) writes to the agent, as questions whose "
                          "word never authorizes it")
@@ -781,7 +829,7 @@ def cli(argv, **kw):
              cards=not a.no_cards, assign_captain=not a.no_assign_captain, todos=a.todos, reports=a.reports, every_line=a.every_line,
              checkins=a.checkins, releases=not a.no_releases, inbox=a.inbox, session_alert=a.session_alert, pings=a.pings,
              assigned_todos=a.assigned_todos, assigned_anywhere=a.assigned_todos_anywhere, assigned_cards=a.assigned_cards, mentions_anywhere=a.mentions_anywhere, advisories=a.advisories, backup=a.backup, chats=not a.no_chats, no_keyring=a.no_keyring,
-             blocked=False if a.no_blocked_reply else a.blocked_reply, **kw).main()
+             blocked=False if a.no_blocked_reply else a.blocked_reply, replace_people=a.replace_people, **kw).main()
     except Refuse as e:
         print(e, file=sys.stderr)
         return 2
